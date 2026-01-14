@@ -1,0 +1,152 @@
+# Assessment Generation Architecture
+
+This document provides a technical overview of the AI-powered Assessment Generation system. It is designed for architectural review and covers system context, data flow, and key logic components.
+
+## 1. System Context
+
+The system operates as a microservice offering a REST API for generating audit-ready assessments from course content (PDFs, Videos/VTTs). It integrates with the Karmayogi Platform for content and Google Vertex AI for generation.
+
+```mermaid
+graph TD
+    User[Learner / Admin] -- "UI (Streamlit)" --> UI[Frontend Service]
+    UI -- "REST API" --> API[Assessment API (FastAPI)]
+    
+    subgraph "Assessment Service (Docker)"
+        API -- "Background Task" --> Worker[Async Worker]
+        Worker -- "Read/Write" --> DB[(PostgreSQL)]
+        Worker -- "File I/O" --> FS[Shared Volume\n(interactive_courses_data)]
+    end
+    
+    Worker -- "Search Content" --> KB[Karmayogi Platform APIs]
+    Worker -- "Generate Content" --> Gemini[Google Vertex AI\n(Gemini 2.5 Pro)]
+    
+    API -- "Download (PDF/DOCX)" --> Exporter[Exporter Engine\n(WeasyPrint)]
+```
+
+## 2. End-to-End Request Flow (Sequence)
+
+The generation process is asynchronous. The API acknowledges the request immediately, while the heavy lifting happens in the background.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API as API Server
+    participant Worker as Background Worker
+    participant Ext as Karmayogi/Files
+    participant LLM as Google GenAI
+    participant DB as Database
+
+    User->>API: POST /generate (Course IDs or Files)
+    API->>API: Generate & Hash Params (Cache Key)
+    API->>DB: Check Cache (Job ID)
+    
+    alt Cache Hit (Completed)
+        DB-->>API: Return Existing Job ID
+        API-->>User: 200 OK (Status: COMPLETED)
+    else New Request
+        API->>DB: Create Job (Status: PENDING)
+        API->>Worker: Dispatch Task
+        API-->>User: 200 OK (Status: PENDING)
+        
+        par Background Processing
+            Worker->>Worker: Update Status: IN_PROGRESS
+            
+            alt Comprehensive Mode
+                Worker->>Ext: Fetch Metadata/PDFs/VTTs (Recursive)
+            else Standalone Mode
+                Worker->>Worker: Process Uploaded Files
+            end
+            
+            Worker->>Worker: Deduplicate Content
+            Worker->>Worker: Build Prompt (v3.5)
+            Worker->>LLM: Generate Assessment (JSON)
+            LLM-->>Worker: JSON Response
+            Worker->>DB: Save Result & Status: COMPLETED
+        end
+    end
+```
+
+## 3. Core Logic: Generator & Prompting
+
+The core intelligence resides in `src/assessment/generator.py` and `prompts.yaml`.
+
+### 3.1 Content Aggregation Strategy
+- **Recursive Fetching**: The system crawls the course hierarchy (deep-search) to find all leaf nodes.
+- **Deduplication**: Content hashes (MD5) are used to prevent processing the same PDF or VTT twice (common in multi-language course structures).
+- **Text Extraction**:
+    - **PDF**: Uses `PyMuPDF` (fitz) for high-fidelity text extraction.
+    - **Video**: Fetches `.vtt` subtitles via the Transcoder stats API.
+
+### 3.2 Prompt Engineering (v3.5)
+The prompt is dynamically constructed based on the `AssessmentType`:
+- **Comprehensive**: Merges context from all course IDs. Logic forces cross-module questions.
+- **Standalone**: STRICT scope limitation to provided files only.
+- **Bloom's Taxonomy**: The prompt enforces a specific distribution (e.g., 20% Remember, 40% Analyze) to ensure pedagogical depth.
+
+```mermaid
+flowchart LR
+    Input[Inputs] --> B{Assessment Type?}
+    B -- Comprehensive --> C[Fetch All Courses]
+    B -- Standalone --> S[Use Uploaded Files]
+    
+    C & S --> D[Content Processor]
+    D --> E[Deduplication & Hash]
+    E --> F[Prompt Builder]
+    
+    F --> G[System Prompt Template]
+    G --> H{LLM Generation}
+    H --> I[JSON Validation]
+    I --> J[Output Assessment]
+```
+
+## 4. PDF Generation (WeasyPrint)
+
+The system utilizes **WeasyPrint** for PDF generation to ensure robust rendering of Indian languages and complex scripts.
+
+- **Approach**: HTML + CSS --> PDF.
+- **Font Stack**: Noto Sans (Malayalam, Tamil, Devanagari, etc.) is embedded via `@font-face`.
+- **Text Shaping**: Uses **Pango** (system library) for correct ligature rendering (unlike ReportLab's limited support).
+
+## 5. Deployment View
+
+Top-level deployment using Docker Compose.
+
+- **API Container**:
+    - Python 3.11 Slim
+    - Dependencies: `fastapi`, `uvicorn`, `weasyprint`, `google-genai`.
+    - System Libs: `libpango-1.0-0`, `libgobject-2.0-0` (for PDF generation).
+- **UI Container**:
+    - Streamlit (runs on port 8501).
+    - Talks to API via internal Docker network (`http://api:8000`).
+- **Storage**:
+    - `/app/interactive_courses_data`: Shared volume for persistence.
+
+## 6. Data Strategy: Caching & Reuse
+
+The system implements a **Two-Layer Caching Strategy** to minimize external API calls and latency.
+
+### Layer 1: Content Cache (File System)
+*   **Goal**: Avoid re-downloading gigabytes of PDF/Video content.
+*   **Mechanism**:
+    *   Courses are stored in `interactive_courses_data/{course_id}`.
+    *   **Logic**: Before fetching, the worker checks if `metadata.json` exists in the target folder.
+    *   **Reuse**: If found, the download phase is **skipped entirely**, and the system reuses the local files.
+    *   **Structure**:
+        ```text
+        /app/interactive_courses_data/
+        ├── do_1139... (Course A)
+        │   ├── metadata.json
+        │   ├── module_1/
+        │   │   ├── handout.pdf
+        │   │   └── intro_video/
+        │   │       └── en/transcript.vtt
+        └── do_1140... (Course B)
+        ```
+
+### Layer 2: Result Cache (Database)
+*   **Goal**: Return instant results for identical requests (same course + same parameters).
+*   **Mechanism**:
+    *   A **Composite Hash** is generated for every request:
+        `Job_ID = {Sorted_Course_IDs}_{MD5(Params)}`
+    *   Params included in hash: `difficulty`, `question_counts`, `prompt_version`, `blooms_distribution`, `inputs`.
+    *   **Reuse**: If a job with this ID exists and is `COMPLETED`, the JSON payload is fetched directly from Postgres. No LLM call is made.
