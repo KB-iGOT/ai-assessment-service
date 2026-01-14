@@ -226,6 +226,7 @@ The generated assessment follows a strict schema enforced by the LLM.
     "True/False Question": [...]
   }
 }
+```
 
 ### 8.3 Polling & Retrieval Endpoints
 Since generation can take 30-60 seconds, the client must poll for completion.
@@ -237,4 +238,3 @@ Since generation can take 30-60 seconds, the client must poll for completion.
 | `/api/v1/download_csv/{job_id}` | `GET` | Download as CSV (Excel compatible). |
 | `/api/v1/download_pdf/{job_id}` | `GET` | Download formatted PDF (uses WeasyPrint). |
 | `/api/v1/download_docx/{job_id}` | `GET` | Download Word Document. |
-```
