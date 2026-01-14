@@ -8,19 +8,19 @@ The system operates as a microservice offering a REST API for generating audit-r
 
 ```mermaid
 graph TD
-    User[Learner / Admin] -- "UI (Streamlit)" --> UI[Frontend Service]
-    UI -- "REST API" --> API[Assessment API (FastAPI)]
+    User["Learner / Admin"] -- "UI (Streamlit)" --> UI["Frontend Service"]
+    UI -- "REST API" --> API["Assessment API (FastAPI)"]
     
     subgraph "Assessment Service (Docker)"
-        API -- "Background Task" --> Worker[Async Worker]
-        Worker -- "Read/Write" --> DB[(PostgreSQL)]
-        Worker -- "File I/O" --> FS[Shared Volume\n(interactive_courses_data)]
+        API -- "Background Task" --> Worker["Async Worker"]
+        Worker -- "Read/Write" --> DB[("PostgreSQL")]
+        Worker -- "File I/O" --> FS["Shared Volume\n(interactive_courses_data)"]
     end
     
-    Worker -- "Search Content" --> KB[Karmayogi Platform APIs]
-    Worker -- "Generate Content" --> Gemini[Google Vertex AI\n(Gemini 2.5 Pro)]
+    Worker -- "Search Content" --> KB["Karmayogi Platform APIs"]
+    Worker -- "Generate Content" --> Gemini["Google Vertex AI\n(Gemini 2.5 Pro)"]
     
-    API -- "Download (PDF/DOCX)" --> Exporter[Exporter Engine\n(WeasyPrint)]
+    API -- "Download (PDF/DOCX)" --> Exporter["Exporter Engine\n(WeasyPrint)"]
 ```
 
 ## 2. End-to-End Request Flow (Sequence)
@@ -150,3 +150,66 @@ The system implements a **Two-Layer Caching Strategy** to minimize external API 
         `Job_ID = {Sorted_Course_IDs}_{MD5(Params)}`
     *   Params included in hash: `difficulty`, `question_counts`, `prompt_version`, `blooms_distribution`, `inputs`.
     *   **Reuse**: If a job with this ID exists and is `COMPLETED`, the JSON payload is fetched directly from Postgres. No LLM call is made.
+
+## 7. Database Design (PostgreSQL)
+
+The system persists assessment states and results in a PostgreSQL database using the `asyncpg` driver.
+
+### Schema: `interactive_assessments`
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `course_id` | `TEXT` | **Primary Key**. The Composite Job ID (Hash). |
+| `status` | `TEXT` | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`. |
+| `metadata` | `JSONB` | Input parameters used for generation (audit trail). |
+| `assessment_data` | `JSONB` | The full generated assessment JSON structure (Result). |
+| `token_usage` | `JSONB` | LLM token consumption stats (cost tracking). |
+| `created_at` | `TIMESTAMP` | Record creation time. |
+| `updated_at` | `TIMESTAMP` | Last status update time. |
+| `error_message` | `TEXT` | Nullable. Error stack trace if failed. |
+
+## 8. API Specification
+
+### 8.1 Input Structure (`POST /generate`)
+The API accepts `multipart/form-data` to handle both metadata and file uploads.
+*   `course_ids`: List of Strings (Optional if standalone).
+*   `assessment_type`: Enum (`final`, `practice`, `comprehensive`, `standalone`).
+*   `files`: List of Binary Files (PDF/VTT).
+*   `blooms_config`: JSON String (e.g., `{"Analyze": 40, "Apply": 30}`).
+*   `question_type_counts`: JSON String (e.g., `{"mcq": 5, "ftb": 2}`).
+
+### 8.2 Output Structure (JSON)
+The generated assessment follows a strict schema enforced by the LLM.
+
+```json
+{
+  "blueprint": {
+    "assessment_scope_summary": "Summary of covered topics...",
+    "courses_covered": ["Course A", "Course B"],
+    "unified_competency_map": {
+      "functional": ["Project Management", "Agile"],
+      "behavioral": ["Teamwork"]
+    },
+    "smart_learning_objectives": ["..."],
+    "blooms_taxonomy_mapping": {"Analyze": "40%", ...}
+  },
+  "questions": {
+    "Multiple Choice Question": [
+      {
+        "question_id": "UUID-1",
+        "question_text": "...",
+        "options": [{"text": "A", "index": 0}, ...],
+        "correct_option_index": 2,
+        "reasoning": {
+            "learning_objective_alignment": "...",
+            "competency_alignment": { "kcm": { "competency_area": "..." } },
+            "blooms_level_justification": "...",
+            "relevance_percentage": 95
+        }
+      }
+    ],
+    "FTB Question": [...],
+    "MTF Question": [...],
+    "True/False Question": [...]
+  }
+}
+```
