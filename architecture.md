@@ -46,7 +46,14 @@ sequenceDiagram
     else New Request
         API->>DB: Create Job (Status: PENDING)
         API->>Worker: Dispatch Task
-        API-->>User: 200 OK (Status: PENDING)
+        API-->>User: 200 OK (Status: PENDING, JobID: xyz)
+        
+        loop Polling Status
+            User->>API: GET /status/xyz
+            API->>DB: Check Status
+            DB-->>API: IN_PROGRESS
+            API-->>User: {"status": "IN_PROGRESS"}
+        end
         
         par Background Processing
             Worker->>Worker: Update Status: IN_PROGRESS
@@ -63,6 +70,11 @@ sequenceDiagram
             LLM-->>Worker: JSON Response
             Worker->>DB: Save Result & Status: COMPLETED
         end
+        
+        User->>API: GET /status/xyz
+        API-->>User: {"status": "COMPLETED"}
+        User->>API: GET /download_pdf/xyz
+        API-->>User: Returns PDF File
     end
 ```
 
@@ -155,6 +167,8 @@ The system implements a **Two-Layer Caching Strategy** to minimize external API 
 
 The system persists assessment states and results in a PostgreSQL database using the `asyncpg` driver.
 
+> **Note**: This single table acts as both the **Progress Tracker** (polled by the UI) and the **Result Store**.
+
 ### Schema: `interactive_assessments`
 | Column | Type | Description |
 | :--- | :--- | :--- |
@@ -212,4 +226,15 @@ The generated assessment follows a strict schema enforced by the LLM.
     "True/False Question": [...]
   }
 }
+
+### 8.3 Polling & Retrieval Endpoints
+Since generation can take 30-60 seconds, the client must poll for completion.
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/v1/status/{job_id}` | `GET` | Returns `{"status": "IN_PROGRESS"}` or `COMPLETED`. |
+| `/api/v1/download_json/{job_id}` | `GET` | Download raw JSON result (once COMPLETED). |
+| `/api/v1/download_csv/{job_id}` | `GET` | Download as CSV (Excel compatible). |
+| `/api/v1/download_pdf/{job_id}` | `GET` | Download formatted PDF (uses WeasyPrint). |
+| `/api/v1/download_docx/{job_id}` | `GET` | Download Word Document. |
 ```
