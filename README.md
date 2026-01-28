@@ -4,11 +4,13 @@ An advanced, audit-ready assessment generation system powered by **Google Gemini
 
 ## Features
 - **Model**: Powered by `gemini-2.5-pro`.
+- **V2 Smart Architecture**: Authentication, Clone-on-Request (Instant Results), and Private Instances.
+- **Event-Driven**: Publishes `ASSESSMENT_COMPLETED` events to **Kafka**.
 - **3 Assessment Types**: Practice (Reinforcement), Final (Certification), and Comprehensive (Cross-course).
 - **Multilingual Support**: Supports 10+ Indian languages (Hindi, Tamil, Telugu, etc.).
 - **KCM Alignment**: Maps questions strictly to the **Karmayogi Competency Model** (Behavioral/Functional).
 - **Explainable-AI**: Every question comes with alignment reasoning (Learning Objectives, KCM Competencies, Bloom's Justification).
-- **Exportable Results**: Download assessments in structured JSON or flattened CSV formats.
+- **Exportable Results**: Download assessments in structured JSON or flattened CSV (V2 Schema) formats.
 
 ---
 
@@ -26,17 +28,24 @@ An advanced, audit-ready assessment generation system powered by **Google Gemini
 3. Place your Google Application Credentials JSON file in the root as `credentials.json`.
 
 ### Method 1: Docker (Recommended)
-Launch the entire stack (Database + API + UI) with one command:
+Launch the entire stack (Database + API + UI + Kafka) with one command:
 ```bash
 docker-compose up --build
 ```
+> **Note**: If `docker-compose` is missing, use the local binary `./docker-compose`.
+
 - **API**: http://localhost:8000
 - **UI**: http://localhost:8501
+- **Kafka**: localhost:29092
 
-### Method 2: Local Installation (Modular)
-1. **Install Dependencies**:
+### Method 2: Hybrid Run (Local API + Docker Infra)
+1. **Start Infra**:
    ```bash
-   pip install -e .
+   ./docker-compose up -d db kafka zookeeper
+   ```
+2. **Start API**:
+   ```bash
+   uv run uvicorn src.assessment.api:app --reload
    ```
 2. **Start the API**:
    ```bash
@@ -50,46 +59,30 @@ docker-compose up --build
 
 ---
 
-## API Documentation (v1)
+## API Documentation (v2) - **Recommended**
 
-- **Common Project Path**: `/ai-assment-generation`
-- **Interactive Documentation**: `http://localhost:8000/ai-assment-generation/docs`
-- **API Base URL**: `http://localhost:8000/ai-assment-generation/api/v1`
-- **OpenAPI Schema**: `http://localhost:8000/ai-assment-generation/openapi.json`
+- **Base URL**: `http://localhost:8000/ai-assment-generation/api/v2`
+- **Authentication**: All endpoints require `x-auth-token` header (JWT).
 
-### 1. `POST /generate`
-Triggers the background process to fetch content and generate an assessment.
-- **Form Data**:
-  - `course_ids` (str): Comma-separated list of do_ids (e.g., `do_123` or `do_123, do_456`).
-  - `assessment_type` (Enum): `practice`, `final`, `comprehensive`.
-  - `difficulty` (Enum): `beginner`, `intermediate`, `advanced`.
-  - `total_questions` (int): Number of questions *per type* (total = N * 3).
-  - `language` (Enum): `english`, `hindi`, `tamil`, `telugu`, `kannada`, `malayalam`, `marathi`, `bengali`, `gujarati`, `punjabi`, `odia`, `assamese`.
-  - `question_types` (List[str], Optional): `mcq`, `ftb`, `mtf`, `multichoice`, `truefalse`. Defaults to all.
-  - `question_type_counts` (str, Optional): JSON string defining count per type. Default: `{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}`.
-  - `time_limit` (int, Optional): Time limit in minutes (e.g., 60).
-  - `topic_names` (str, Optional): Comma-separated list of priority topics.
-  - `blooms_config` (str, Optional): JSON string, e.g., `{"Remember": 20, "Apply": 80}`.
-  - `additional_instructions` (str): SME notes.
-  - `files` (Optional): Extra PDFs to include in analysis.
+### 1. `POST /api/v2/generate`
+Smart generation endpoint with **Cloning** capabilities.
+- **Headers**: `x-auth-token: <jwt>`
+- **Logic**:
+  - If identical job exists (any user) -> **CLONES** result instantly (200 OK).
+  - If new -> Starts Async Job (202 ACCEPTED).
+- **Body**: Same as V1 (course_ids, assessment_type, difficulty, etc.)
 
-**Response**:
-```json
-{
-  "message": "Generation started",
-  "status": "PENDING",
-  "job_id": "comprehensive_do_123_do_456" // Composite ID for multi-course jobs
-}
-```
+### 2. `PUT /api/v2/assessment/{job_id}`
+Edit questions before finalizing.
+- **Access**: Only the **Owner** (creator/cloner) can edit.
+- **Body**: `{"assessment_data": { ... }}`
 
-### 2. `GET /status/{job_id}`
-Returns current status and result data. Use the `job_id` returned from `/generate`.
+### 3. `GET /api/v2/download_csv/{job_id}`
+Download result in the **V2 Schema** (7-Option Columns).
 
-### 3. `GET /download/{job_id}`
-Downloads the assessment as a flattened CSV.
-
-### 4. `GET /download_json/{job_id}`
-Downloads the raw structured JSON.
+### Legacy V1 API
+- Still available at `/api/v1/...` for backward compatibility.
+- Does not support cloning or editing.
 
 ---
 
