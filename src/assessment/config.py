@@ -21,8 +21,9 @@ TRANSCODER_STATS_URL = "https://learning-ai.prod.karmayogibharat.net/api/kb-pipe
 DB_DSN = os.getenv("DB_DSN", "postgresql://myuser:mypassword@localhost:5432/karmayogi_db")
 
 # Paths
-# Store data in the root directory's interactive_courses_data folder
-INTERACTIVE_COURSES_PATH = os.path.join(ROOT_DIR, "interactive_courses_data")
+# Store data in the root directory's interactive_courses_data folder (or custom path)
+default_courses_path = os.path.join(ROOT_DIR, "interactive_courses_data")
+INTERACTIVE_COURSES_PATH = os.getenv("INTERACTIVE_COURSES_PATH", default_courses_path)
 
 # Google GenAI
 GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
