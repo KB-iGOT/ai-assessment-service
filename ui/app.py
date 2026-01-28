@@ -1,3 +1,4 @@
+
 import streamlit as st
 import requests
 import time
@@ -9,55 +10,53 @@ from dotenv import load_dotenv
 # Load local .env if present
 load_dotenv()
 
-# Read API_URL from environment or fallback
-API_URL = os.getenv("API_URL", "http://localhost:8000")
-# Append the versioned path if not already present
-if not API_URL.endswith("/ai-assment-generation/api/v1"):
-    API_URL = f"{API_URL.rstrip('/')}/ai-assment-generation/api/v1"
+# --- Configuration ---
+# Default to localhost for local testing
+API_BASE = os.getenv("API_URL", "http://localhost:8000")
+API_V2 = f"{API_BASE}/api/v2"
 
-st.set_page_config(page_title="Assessment Generator v3.3", layout="wide")
+st.set_page_config(page_title="Assessment Generator V2 (Interactive)", layout="wide", page_icon="🧩")
 
-st.title("Course Assessment Generator (Prompt v3.3)")
+# --- Sidebar: Auth & Config ---
+st.sidebar.title("⚙️ Configuration")
+auth_token = st.sidebar.text_input("Auth Token (JWT)", type="password", help="Enter your x-auth-token from iGot")
 
-col_input, col_mode = st.columns([3, 1])
-with col_mode:
-    use_custom = st.checkbox("Upload Only Mode", help="Generate from uploaded files without a Course ID")
-
-with col_input:
-    if use_custom:
-        st.info("Upload-only mode active. Please upload files below.")
-        course_id = ""
-    else:
-        course_id = st.text_input("Enter Course ID", placeholder="do_1234567890")
-
-if course_id or use_custom:
-    # Use active job ID from session if available (for polling), otherwise input ID (for initial check)
-    current_job_id = st.session_state.get('active_job_id', course_id)
+if not auth_token:
+    st.sidebar.warning("⚠️ Auth Token is required for V2 API")
     
-    # Check Status
-    status = "NOT_FOUND" # Default start state
-    if current_job_id:
-        try:
-            resp = requests.get(f"{API_URL}/status/{current_job_id}")
-            
-            if resp.status_code == 404:
-                # st.info("No assessment found for this course.") 
-                status = "NOT_FOUND"
-            elif resp.status_code == 200:
-                data = resp.json()
-                status = data.get("status")
-                st.write(f"**Current Status:** {status}")
-                if status == "FAILED":
-                    st.error(f"Error: {data.get('error_message')}")
-        except requests.exceptions.ConnectionError:
-            st.error("Backend API is not running. Please start the FastAPI server.")
-            st.stop()
+debug_mode = st.sidebar.checkbox("Debug Mode", value=False)
 
-    # Actions based on status
-    if status == "NOT_FOUND" or status == "FAILED" or (status == "COMPLETED" and st.checkbox("Force Regenerate")):
-        st.subheader("Generate Assessment")
-        
-        # Step 1: Core Config
+# Headers helper
+def get_headers():
+    return {
+        "x-auth-token": auth_token,
+        "bg-bypass-cache": "true" if st.sidebar.checkbox("Bypass Cache (Force New)", value=False) else "false"
+    }
+
+st.title("🧩 Assessment Generator V2")
+st.markdown("Test the full **Generate -> Clone -> Edit -> Event** lifecycle.")
+
+# --- Tab Layout ---
+tab_gen, tab_view = st.tabs(["🚀 Generate / Clone", "📝 View & Edit Result"])
+
+# ==========================================
+# TAB 1: GENERATE
+# ==========================================
+with tab_gen:
+    col_input, col_mode = st.columns([3, 1])
+    with col_mode:
+        use_custom = st.checkbox("Upload Only Mode", help="Generate from uploaded files without a Course ID")
+
+    with col_input:
+        if use_custom:
+            st.info("Upload-only mode active. Please upload files below.")
+            course_id = ""
+            course_ids_input = ""
+        else:
+            course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...")
+
+    # Config Form
+    with st.expander("Detailed Configuration", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
             assessment_type = st.selectbox("Assessment Type", ["practice", "final", "comprehensive", "standalone"])
@@ -65,259 +64,167 @@ if course_id or use_custom:
             difficulty = st.selectbox("Difficulty", ["beginner", "intermediate", "advanced"], index=1)
         with col3:
             language = st.selectbox(
-                "Language Selection", 
+                "Language", 
                 ["english", "hindi", "bengali", "gujarati", "kannada", "malayalam", "marathi", "tamil", "telugu", "odia", "punjabi", "assamese"]
             )
-
-        # Step 2: Course Inputs
-        if assessment_type == "comprehensive":
-            course_ids_input = st.text_area("Target Course IDs (comma-separated)", value=course_id, placeholder="do_123, do_456, do_789")
-        else:
-            # Single course mode: Use the top-level input directly
-            st.markdown(f"**Target Course:** `{course_id}`")
-            course_ids_input = course_id
-
-        # Step 3: Question Type Counts
-        st.markdown("#### Question Type Distribution")
-        col_mcq, col_ftb, col_mtf, col_multi, col_tf = st.columns(5)
+            
+        st.markdown("#### Question Counts")
+        c1, c2, c3, c4 = st.columns(4)
+        mcq = c1.number_input("MCQ", 0, 20, 5)
+        ftb = c2.number_input("FTB", 0, 20, 5)
+        mtf = c3.number_input("MTF", 0, 20, 5)
+        tf  = c4.number_input("True/False", 0, 20, 0)
         
-        with col_mcq:
-            mcq_count = st.number_input(
-                "MCQ Questions",
-                min_value=0,
-                max_value=20,
-                value=5,
-                step=1,
-                help="Multiple Choice (Single Correct)"
-            )
+        uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
+
+    if st.button("Start Generation (V2)", type="primary"):
+        if not auth_token:
+            st.error("Please enter an Auth Token in the sidebar first.")
+            st.stop()
             
-        with col_ftb:
-            ftb_count = st.number_input(
-                "FTB Questions",
-                min_value=0,
-                max_value=20,
-                value=5,
-                step=1,
-                help="Fill in the Blank"
-            )
-
-        with col_mtf:
-            mtf_count = st.number_input(
-                "MTF Questions",
-                min_value=0,
-                max_value=20,
-                value=5,
-                step=1,
-                help="Match the Following"
-            )
-            
-        with col_multi:
-            multi_count = st.number_input(
-                "Multi-Choice",
-                min_value=0,
-                max_value=20,
-                value=0,
-                step=1,
-                help="Multiple Correct Options"
-            )
-            
-        with col_tf:
-            tf_count = st.number_input(
-                "True/False",
-                min_value=0,
-                max_value=20,
-                value=0,
-                step=1,
-                help="True or False Questions"
-            )
-
-        total_questions = mcq_count + ftb_count + mtf_count + multi_count + tf_count
-        st.info(f"Total Questions: {total_questions}")
-
-        # Step 4: Additional Config
-        time_limit = st.number_input("Time Limit (Minutes)", min_value=10, max_value=180, value=60, step=10)
-
-        # Step 4: Advanced Config
-        with st.expander("Advanced Configuration (Bloom's & Topics)", expanded=False):
-            topic_names = st.text_input("Prioritize Topics (comma-separated)", placeholder="e.g. Budgeting, Risk Management, Python Basics")
-            
-            st.markdown("#### Bloom's Taxonomy Distribution (Must sum to 100%)")
-            b_col1, b_col2, b_col3, b_col4, b_col5, b_col6 = st.columns(6)
-            b_remember = b_col1.number_input("Remember %", value=20, min_value=0, max_value=100)
-            b_understand = b_col2.number_input("Understand %", value=25, min_value=0, max_value=100)
-            b_apply = b_col3.number_input("Apply %", value=25, min_value=0, max_value=100)
-            b_analyze = b_col4.number_input("Analyze %", value=20, min_value=0, max_value=100)
-            b_evaluate = b_col5.number_input("Evaluate %", value=10, min_value=0, max_value=100)
-            b_create = b_col6.number_input("Create %", value=0, min_value=0, max_value=100)
-
-            total_blooms = b_remember + b_understand + b_apply + b_analyze + b_evaluate + b_create
-            if total_blooms != 100:
-                st.warning(f"Total Bloom's Percentage: {total_blooms}%. It should be exactly 100%.")
-
-        uploaded_files = st.file_uploader("Upload extra content (PDF/VTT)", accept_multiple_files=True, type=['pdf', 'vtt'])
-        additional_instructions = st.text_area("Additional Instructions (SME notes)", placeholder="e.g. Focus on Chapter 3, exclude technical jargon...")
+        # Construct Payload
+        q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "truefalse": tf}
+        q_types = [k for k,v in q_counts.items() if v > 0]
         
-        if st.button("Start Generation"):
-            if total_blooms != 100:
-                st.error("Cannot start: Bloom's Taxonomy distribution must equal 100%.")
-                st.stop()
+        payload = {
+            'course_ids': course_ids_input,
+            'force': 'true', # UI always forces new request logic? Or maybe rely on cache? 
+            # Actually, V2 automatically caches. Force=true breaks cache. 
+            # Let's verify 'bg-bypass-cache' header logic? 
+            # No, 'force' param in body controls it.
+            # Let's set force=False by default to test Cloning.
+            'force': 'false', 
+            'assessment_type': assessment_type,
+            'difficulty': difficulty,
+            'total_questions': sum(q_counts.values()),
+            'question_type_counts': json.dumps(q_counts),
+            'question_types': ",".join(q_types),
+            'language': language
+        }
+        
+        files = []
+        if uploaded_files:
+            for f in uploaded_files:
+                mime = "application/pdf" if f.name.endswith(".pdf") else "text/vtt"
+                files.append(('files', (f.name, f.getvalue(), mime)))
 
-            if total_questions == 0:
-                st.error("Please specify at least one question (MCQ, FTB, or MTF).")
-                st.stop()
-
-            files = []
-            if uploaded_files:
-                for f in uploaded_files:
-                    mime_type = "application/pdf" if f.name.endswith(".pdf") else "text/vtt"
-                    files.append(('files', (f.name, f.getvalue(), mime_type)))
-
-            # Construct Payload
-            blooms_config = {
-                "Remember": b_remember,
-                "Understand": b_understand,
-                "Apply": b_apply,
-                "Analyze": b_analyze,
-                "Evaluate": b_evaluate,
-                "Create": b_create
-            }
-
-            # Build question_type_counts JSON
-            question_type_counts_dict = {}
-            q_types_list = []
-
-            if mcq_count > 0:
-                question_type_counts_dict["mcq"] = mcq_count
-                q_types_list.append("mcq")
-            if ftb_count > 0:
-                question_type_counts_dict["ftb"] = ftb_count
-                q_types_list.append("ftb")
-            if mtf_count > 0:
-                question_type_counts_dict["mtf"] = mtf_count
-                q_types_list.append("mtf")
-            if multi_count > 0:
-                question_type_counts_dict["multichoice"] = multi_count
-                q_types_list.append("multichoice")
-            if tf_count > 0:
-                question_type_counts_dict["truefalse"] = tf_count
-                q_types_list.append("truefalse")
-
-            q_types_str = ",".join(q_types_list)
-            question_type_counts_json = json.dumps(question_type_counts_dict)
-
-            payload = {
-                'course_ids': course_ids_input,
-                'force': 'true',
-                'assessment_type': assessment_type,
-                'difficulty': difficulty,
-                'total_questions': total_questions,
-                'question_type_counts': question_type_counts_json,
-                'question_types': q_types_str,
-                'time_limit': time_limit,
-                'topic_names': topic_names,
-                'blooms_config': json.dumps(blooms_config),
-                'additional_instructions': additional_instructions,
-                'language': language
-            }
-            
-            with st.spinner("Initiating job..."):
-                r = requests.post(f"{API_URL}/generate", data=payload, files=files)
-                if r.status_code == 200:
+        with st.spinner("Calling V2 API..."):
+            try:
+                # V2 Generate Call
+                r = requests.post(f"{API_V2}/generate", data=payload, files=files, headers=get_headers())
+                
+                if r.status_code in [200, 202]:
                     data = r.json()
-                    new_job_id = data.get("job_id")
-                    st.session_state['active_job_id'] = new_job_id
-                    st.success(f"Job started! ID: {new_job_id}")
-                    time.sleep(2)
-                    st.rerun()
+                    st.session_state['current_job_id'] = data.get("job_id")
+                    st.session_state['job_status'] = data.get("status")
+                    
+                    if r.status_code == 200:
+                        st.success(f"⚡ Instant Result! (Cache Hit/Cloned). Job ID: {data.get('job_id')}")
+                        st.balloons()
+                    else: # 202
+                        st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
+                        st.info("Go to 'View & Edit Result' tab to poll status.")
                 else:
-                    st.error(f"Failed to start job: {r.text}")
+                    st.error(f"API Error ({r.status_code}): {r.text}")
+                    
+            except Exception as e:
+                st.error(f"Connection Failed: {e}")
 
-    elif status == "IN_PROGRESS" or status == "PENDING":
-        st.info(f"Generation in progress for Job ID: {current_job_id}... Please wait.")
-        progress_bar = st.progress(0)
-        for i in range(100):
-            time.sleep(0.1)
-            progress_bar.progress(i + 1)
-        
-        time.sleep(2)
-        st.rerun()
-
-    elif status == "COMPLETED":
-        st.success("Assessment Generated Successfully!")
-        
-        # Show details
-        data = resp.json()
-        
-        st.subheader("Token Usage")
-        token_usage = data.get("token_usage", {})
-        if isinstance(token_usage, str):
-            try:
-                token_usage = json.loads(token_usage)
-            except:
-                pass
-        st.json(token_usage, expanded=False)
-
-        st.subheader("Assessment Results")
-        assessment_data = data.get("assessment_data", {})
-        if isinstance(assessment_data, str):
-            try:
-                assessment_data = json.loads(assessment_data)
-            except:
-                pass
-        
-        tab1, tab2 = st.tabs(["Blueprint", "Questions"])
-        
-        with tab1:
-            blueprint = assessment_data.get("blueprint", {})
-            st.info(f"**Audit Info:** Prompt {blueprint.get('prompt_version', 'N/A')} | API {blueprint.get('api_version', 'N/A')}")
-            st.json(blueprint)
+# ==========================================
+# TAB 2: VIEW & EDIT
+# ==========================================
+with tab_view:
+    job_id = st.text_input("Job ID", value=st.session_state.get('current_job_id', ''))
+    
+    col_act1, col_act2 = st.columns([1, 4])
+    with col_act1:
+        if st.button("Check Status / Fetch"):
+            if not job_id: st.warning("Enter Job ID"); st.stop()
+            if not auth_token: st.error("Auth Token Required"); st.stop()
             
-        with tab2:
-            questions = assessment_data.get("questions", {})
-            for q_type, q_list in questions.items():
-                with st.expander(f"{q_type} ({len(q_list)} items)"):
-                    for q in q_list:
-                        st.markdown(f"**Q: {q.get('question_text', '')}**")
-                        if q_type == "Multiple Choice Question":
-                            for opt in q.get("options", []):
-                                st.write(f"- {opt['text']}")
-                            st.info(f"Answer: Option {q.get('correct_option_index')}")
-                        elif q_type == "Multi-Choice Question":
-                             for opt in q.get("options", []):
-                                st.write(f"- {opt['text']}")
-                             st.info(f"Correct Options: {q.get('correct_option_index')}")
-                        elif q_type == "MTF Question":
-                            for p in q.get("pairs", []):
-                                st.write(f"- {p['left']} → {p['right']}")
-                        else:
-                            # FTB and True/False
-                            st.info(f"Answer: {q.get('correct_answer')}")
-                        
-                        # Explainability Section
-                        reasoning = q.get('reasoning', {})
-                        kcm = reasoning.get('competency_alignment', {}).get('kcm', {})
-                        
-                        rel_pct = q.get('relevance_percentage', 0)
-                        st.write(f"**Relevance:** `{rel_pct}%` | **Bloom:** `{q.get('blooms_level', 'N/A')}`")
-                        
-                        with st.expander("View SME Alignment & Reasoning"):
-                            st.markdown(f"**Learning Objective:** {reasoning.get('learning_objective_alignment')}")
-                            st.markdown(f"**KCM Competency:** {kcm.get('competency_area')} → {kcm.get('competency_theme')} → {kcm.get('competency_sub_theme')}")
-                            if reasoning.get('competency_alignment', {}).get('domain'):
-                                st.markdown(f"**Domain Mapping:** {reasoning.get('competency_alignment', {}).get('domain')}")
-                            st.markdown(f"**Bloom Justification:** {reasoning.get('blooms_level_justification')}")
-                            st.markdown(f"**Difficulty Justification:** {reasoning.get('difficulty_justification')}")
-                            st.markdown(f"**Rationale:** {reasoning.get('question_type_rationale')}")
-                        st.divider()
+            try:
+                # V2 Status Check (Uses V2 GET typically, effectively same as V1 but we should use api/v2 prefix if exists? 
+                # Doc says Polling is V1 compatible. But api/v2/status exists? 
+                # Actually code implemented api_v2_router.get("/status/{job_id}")
+                r = requests.get(f"{API_V2}/status/{job_id}", headers=get_headers())
+                if r.status_code == 200:
+                    st.session_state['fetch_data'] = r.json()
+                    st.success("Fetched!")
+                else:
+                    st.error(f"Error ({r.status_code}): {r.text}")
+            except Exception as e:
+                st.error(f"Conn Error: {e}")
+
+    # Display Data
+    data = st.session_state.get('fetch_data', {})
+    if data:
+        status = data.get("status")
+        st.metric("Status", status)
         
-        # Download
-        st.subheader("Download Results")
-        col_dl1, col_dl2, col_dl3, col_dl4 = st.columns(4)
-        with col_dl1:
-            st.link_button("Download JSON", f"{API_URL}/download_json/{current_job_id}")
-        with col_dl2:
-            st.link_button("Download CSV", f"{API_URL}/download_csv/{current_job_id}")
-        with col_dl3:
-            st.link_button("Download PDF", f"{API_URL}/download_pdf/{current_job_id}")
-        with col_dl4:
-            st.link_button("Download DOCX", f"{API_URL}/download_docx/{current_job_id}")
+        if status == "COMPLETED":
+            # Downloads
+            st.markdown("### 📥 Downloads")
+            d1, d2, d3 = st.columns(3)
+            # V2 CSV Link
+            d1.markdown(f"[**Download CSV (V2)**]({API_V2}/download_csv/{job_id})")
+            d2.markdown(f"[Download JSON]({API_BASE}/api/v1/download_json/{job_id})")
+            d3.markdown(f"[Download PDF]({API_BASE}/api/v1/download_pdf/{job_id})")
+
+            # EDITOR
+            st.markdown("### ✏️ Interactive Editor")
+            st.info("Edit questions below and click 'Save Changes' to update the backend.")
+            
+            # Parse Data
+            raw_res = data.get("assessment_data", {})
+            if isinstance(raw_res, str): raw_res = json.loads(raw_res)
+            
+            # We need to preserve the structure to save it back
+            # Flatten for editing? 
+            questions = raw_res.get("questions", {})
+            
+            # Form for editing
+            with st.form("edit_assessment_form"):
+                new_questions_data = {}
+                
+                for q_type, q_list in questions.items():
+                    st.markdown(f"**{q_type}**")
+                    new_q_list = []
+                    for i, q in enumerate(q_list):
+                        # Unique Key for widgets
+                        qk = f"{q_type}_{i}"
+                        
+                        cols = st.columns([5, 1])
+                        # Edit Question Text
+                        updated_text = cols[0].text_area(f"Q{i+1}", q.get("question_text"), key=f"qtxt_{qk}")
+                        
+                        # Edit Answer (Simplification for UI)
+                        # We only allow editing text for now to keep UI simple
+                        
+                        # Reconstruct object
+                        updated_q = q.copy()
+                        updated_q['question_text'] = updated_text
+                        new_q_list.append(updated_q)
+                        
+                    new_questions_data[q_type] = new_q_list
+                
+                if st.form_submit_button("💾 Save Changes (PUT /api/v2)"):
+                    # Construct full payload
+                    updated_assessment = raw_res.copy()
+                    updated_assessment['questions'] = new_questions_data
+                    
+                    update_payload = {"assessment_data": updated_assessment}
+                    
+                    try:
+                        r_upd = requests.put(
+                            f"{API_V2}/assessment/{job_id}", 
+                            json=update_payload, 
+                            headers=get_headers()
+                        )
+                        if r_upd.status_code == 200:
+                            st.success("Saved successfully!")
+                            st.session_state['fetch_data']['assessment_data'] = updated_assessment # Local update
+                            st.rerun()
+                        else:
+                            st.error(f"Save Failed: {r_upd.text}")
+                    except Exception as e:
+                        st.error(f"Update Error: {e}")

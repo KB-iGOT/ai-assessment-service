@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS interactive_assessments (
     course_id TEXT PRIMARY KEY,
+    user_id TEXT, -- Nullable for v1 compatibility
     status TEXT NOT NULL, -- 'PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED'
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
@@ -24,6 +25,14 @@ async def init_db():
     conn = await asyncpg.connect(DB_DSN)
     try:
         await conn.execute(CREATE_TABLE_SQL)
+        
+        # Auto-Migration: Ensure user_id column exists (for existing DBs)
+        try:
+            await conn.execute("ALTER TABLE interactive_assessments ADD COLUMN IF NOT EXISTS user_id TEXT;")
+        except Exception as e:
+            # Ignore if column already exists or other harmless race conditions
+            pass
+            
     finally:
         await conn.close()
 
@@ -37,15 +46,15 @@ async def get_assessment_status(course_id: str) -> Optional[Dict[str, Any]]:
     finally:
         await conn.close()
 
-async def create_job(course_id: str):
+async def create_job(course_id: str, user_id: Optional[str] = None):
     conn = await asyncpg.connect(DB_DSN)
     try:
         await conn.execute("""
-            INSERT INTO interactive_assessments (course_id, status, updated_at)
-            VALUES ($1, 'PENDING', NOW())
+            INSERT INTO interactive_assessments (course_id, user_id, status, updated_at)
+            VALUES ($1, $2, 'PENDING', NOW())
             ON CONFLICT (course_id) DO UPDATE
-            SET status = 'PENDING', updated_at = NOW(), error_message = NULL
-        """, course_id)
+            SET status = 'PENDING', user_id = EXCLUDED.user_id, updated_at = NOW(), error_message = NULL
+        """, course_id, user_id)
     finally:
         await conn.close()
 
@@ -72,5 +81,59 @@ async def save_assessment_result(course_id: str, metadata: dict, assessment: dic
                 updated_at = NOW()
             WHERE course_id = $1
         """, course_id, json.dumps(metadata), json.dumps(assessment), json.dumps(usage))
+    finally:
+        await conn.close()
+
+async def find_job_by_prefix(prefix: str) -> Optional[Dict[str, Any]]:
+    """
+    Finds a completed job that matches the prefix (Base Hash).
+    Used to find a template to clone from.
+    """
+    conn = await asyncpg.connect(DB_DSN)
+    try:
+        # Optimization: Prefer jobs that haven't been edited if we track that?
+        # For now, just grab the most recently updated successful one
+        row = await conn.fetchrow("""
+            SELECT * FROM interactive_assessments 
+            WHERE course_id LIKE $1 || '%' 
+            AND status = 'COMPLETED' 
+            ORDER BY updated_at DESC 
+            LIMIT 1
+        """, prefix)
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+async def create_completed_job(course_id: str, user_id: str, metadata: dict, assessment: dict, usage: dict):
+    """
+    Creates a new job record directly in COMPLETED state (Cloning).
+    """
+    conn = await asyncpg.connect(DB_DSN)
+    try:
+        await conn.execute("""
+            INSERT INTO interactive_assessments 
+            (course_id, user_id, status, metadata, assessment_data, token_usage, updated_at)
+            VALUES ($1, $2, 'COMPLETED', $3, $4, $5, NOW())
+            ON CONFLICT (course_id) DO NOTHING
+        """, course_id, user_id, json.dumps(metadata), json.dumps(assessment), json.dumps(usage))
+    finally:
+        await conn.close()
+
+async def update_job_result(job_id: str, user_id: str, new_assessment_data: dict) -> bool:
+    """
+    Updates the assessment result (Edit Mode).
+    Enforces ownership (user_id must match).
+    """
+    conn = await asyncpg.connect(DB_DSN)
+    try:
+        result = await conn.execute("""
+            UPDATE interactive_assessments
+            SET assessment_data = $3, updated_at = NOW()
+            WHERE course_id = $1 AND user_id = $2
+        """, job_id, user_id, json.dumps(new_assessment_data))
+        
+        # Check if rows were updated (if 0, implies job not found or unauthorized)
+        # "UPDATE 1" -> 'UPDATE' in tag, '1' in rows
+        return result != "UPDATE 0"
     finally:
         await conn.close()

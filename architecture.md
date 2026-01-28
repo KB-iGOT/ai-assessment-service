@@ -9,13 +9,16 @@ The system operates as a microservice offering a REST API for generating audit-r
 ```mermaid
 graph TD
     User["Learner / Admin"] -- "UI (Streamlit)" --> UI["Frontend Service"]
-    UI -- "REST API" --> API["Assessment API (FastAPI)"]
+    UI -- "REST API (Auth Token)" --> API["Assessment API (FastAPI)"]
     
     subgraph "Assessment Service (Docker)"
         API -- "Background Task" --> Worker["Async Worker"]
         Worker -- "Read/Write" --> DB[("PostgreSQL")]
         Worker -- "File I/O" --> FS["Shared Volume\n(interactive_courses_data)"]
+        Worker -- "Publish Events" --> Kafka["Kafka (Event Bus)"]
     end
+    
+    API -.-> IdP["Identity Provider\n(Sunbird/Keycloak)"]
     
     Worker -- "Search Content" --> KB["Karmayogi Platform APIs"]
     Worker -- "Generate Content" --> Gemini["Google Vertex AI\n(Gemini 2.5 Pro)"]
@@ -30,51 +33,46 @@ The generation process is asynchronous. The API acknowledges the request immedia
 ```mermaid
 sequenceDiagram
     participant User
-    participant API as API Server
-    participant Worker as Background Worker
-    participant Ext as Karmayogi/Files
-    participant LLM as Google GenAI
+    participant API as API ServerV2
     participant DB as Database
+    participant Worker as Background Worker
+    participant LLM as Google GenAI
+    participant Kafka as Kafka Topic
 
-    User->>API: POST /generate (Course IDs or Files)
-    API->>API: Generate & Hash Params (Cache Key)
-    API->>DB: Check Cache (Job ID)
+    User->>API: POST /api/v2/generate (with JWT)
+    API->>API: Validate Token & Extract UserID
+    API->>API: Generate & Hash Params
     
-    alt Cache Hit (Completed)
-        DB-->>API: Return Existing Job ID
+    API->>DB: Check Cache (Hash + UserID)
+    
+    alt Own Cache Hit (Already Exists)
+        DB-->>API: Return Existing Record
         API-->>User: 200 OK (Status: COMPLETED)
-    else New Request
+    
+    else Template Hit (Shared Cache)
+        API->>DB: Find Job by Hash-Prefix (Any User)
+        DB-->>API: Found Template
+        API->>DB: CLONE to Current UserID
+        API-->>User: 200 OK (Status: COMPLETED, Cloned)
+        
+    else New Request (Async)
         API->>DB: Create Job (Status: PENDING)
         API->>Worker: Dispatch Task
-        API-->>User: 200 OK (Status: PENDING, JobID: xyz)
-        
-        loop Polling Status
-            User->>API: GET /status/xyz
-            API->>DB: Check Status
-            DB-->>API: IN_PROGRESS
-            API-->>User: {"status": "IN_PROGRESS"}
-        end
+        API-->>User: 202 Accepted (Status: PENDING)
         
         par Background Processing
             Worker->>Worker: Update Status: IN_PROGRESS
-            
-            alt Comprehensive Mode
-                Worker->>Ext: Fetch Metadata/PDFs/VTTs (Recursive)
-            else Standalone Mode
-                Worker->>Worker: Process Uploaded Files
-            end
-            
-            Worker->>Worker: Deduplicate Content
-            Worker->>Worker: Build Prompt (v3.5)
-            Worker->>LLM: Generate Assessment (JSON)
+            Worker->>Worker: Fetch & Process Content
+            Worker->>LLM: Generate Assessment
             LLM-->>Worker: JSON Response
             Worker->>DB: Save Result & Status: COMPLETED
+            Worker->>Kafka: Publish "COMPLETED" Event
         end
         
-        User->>API: GET /status/xyz
-        API-->>User: {"status": "COMPLETED"}
-        User->>API: GET /download_pdf/xyz
-        API-->>User: Returns PDF File
+        opt Polling (Legacy Fallback)
+            User->>API: GET /status/xyz
+            API-->>User: {"status": "COMPLETED"}
+        end
     end
 ```
 
@@ -167,12 +165,11 @@ The system implements a **Two-Layer Caching Strategy** to minimize external API 
 
 The system persists assessment states and results in a PostgreSQL database using the `asyncpg` driver.
 
-> **Note**: This single table acts as both the **Progress Tracker** (polled by the UI) and the **Result Store**.
-
 ### Schema: `interactive_assessments`
 | Column | Type | Description |
 | :--- | :--- | :--- |
-| `course_id` | `TEXT` | **Primary Key**. The Composite Job ID (Hash). |
+| `course_id` | `TEXT` | **Primary Key**. The Composite Job ID (`{SharedHash}_{UserID}`). |
+| `user_id` | `TEXT` | **Owner**. The UUID of the user who owns this record. |
 | `status` | `TEXT` | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`. |
 | `metadata` | `JSONB` | Input parameters used for generation (audit trail). |
 | `assessment_data` | `JSONB` | The full generated assessment JSON structure (Result). |
@@ -180,6 +177,23 @@ The system persists assessment states and results in a PostgreSQL database using
 | `created_at` | `TIMESTAMP` | Record creation time. |
 | `updated_at` | `TIMESTAMP` | Last status update time. |
 | `error_message` | `TEXT` | Nullable. Error stack trace if failed. |
+
+## 8. Event-Driven Architecture (Kafka)
+
+The system publishes lifecycle events to Kafka to enable real-time notifications.
+
+- **Topic**: `assessment.lifecycle.events` (Configurable)
+- **Trigger**: Job Completion (Success/Failure)
+- **Payload**:
+  ```json
+  {
+      "event_type": "ASSESSMENT_GENERATION_COMPLETED",
+      "job_id": "...",
+      "user_id": "...",
+      "status": "COMPLETED",
+      "payload": { ... }
+  }
+  ```
 
 ## 8. API Specification
 
@@ -228,13 +242,24 @@ The generated assessment follows a strict schema enforced by the LLM.
 }
 ```
 
-### 8.3 Polling & Retrieval Endpoints
-Since generation can take 30-60 seconds, the client must poll for completion.
+## 9. API Specification (V2)
 
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/api/v1/status/{job_id}` | `GET` | Returns `{"status": "IN_PROGRESS"}` or `COMPLETED`. |
-| `/api/v1/download_json/{job_id}` | `GET` | Download raw JSON result (once COMPLETED). |
-| `/api/v1/download_csv/{job_id}` | `GET` | Download as CSV (Excel compatible). |
-| `/api/v1/download_pdf/{job_id}` | `GET` | Download formatted PDF (uses WeasyPrint). |
-| `/api/v1/download_docx/{job_id}` | `GET` | Download Word Document. |
+The V2 API introduces Authentication, Cloning, and Interactive Editing.
+
+### 9.1 Generate (`POST /api/v2/generate`)
+- **Headers**: `x-auth-token` (JWT)
+- **Logic**:
+    1.  **Auth**: Validates JWT, extracts `user_id`.
+    2.  **Hash**: Computes hash of inputs.
+    3.  **Clone check**: If a completed job with same hash exists (any user), **Clone** it to current user.
+    4.  **Return**:
+        - `200 OK`: If cloned/cached (JSON Body included).
+        - `202 Accepted`: If new generation started.
+
+### 9.2 Edit (`PUT /api/v2/assessment/{job_id}`)
+- **Headers**: `x-auth-token`
+- **Logic**: Updates `assessment_data` ONLY if `user_id` matches the owner.
+- **Payload**: `{"assessment_data": { ... }}`
+
+### 9.3 Polling & Retrieval
+(Same as V1, but V2 endpoints enforce Auth).

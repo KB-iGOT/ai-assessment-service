@@ -29,6 +29,9 @@ services:
       - GENAI_MODEL_NAME=${GENAI_MODEL_NAME}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
       - KARMAYOGI_API_KEY=${KARMAYOGI_API_KEY}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC=assessment.lifecycle.events
+      - DISABLE_AUTH_VERIFICATION=${DISABLE_AUTH_VERIFICATION:-false}
     command: uvicorn assessment.api:app --host 0.0.0.0 --port 8000
 
   ui:
@@ -41,6 +44,28 @@ services:
       - "8501:8501"
     depends_on:
       - api
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "22181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
 volumes:
   postgres_data:
