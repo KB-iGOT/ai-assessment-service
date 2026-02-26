@@ -69,7 +69,6 @@ async def process_job(payload: Dict[str, Any]):
             input_language=payload.get('language'),
             topic_names=payload.get('topic_names'),
             blooms_distribution=payload.get('blooms_distribution'),
-            question_types=payload.get('question_types'),
             time_limit=payload.get('time_limit'),
             extra_files=extra_files
         )

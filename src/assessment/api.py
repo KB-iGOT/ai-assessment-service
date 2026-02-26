@@ -130,7 +130,6 @@ async def generate(
         '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}', 
         description='Default values: {"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}'
     ),
-    question_types: List[str] = Form(["mcq", "ftb", "mtf", "multichoice", "truefalse"], description="List of Question Types"),
     time_limit: Optional[int] = Form(None, description="Time limit in minutes"),
     topic_names: Optional[str] = Form("", description="Comma-separated topics"),
     language: Language = Form(Language.ENGLISH),
@@ -167,17 +166,12 @@ async def generate(
     if not c_ids and not valid_files:
         raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
 
-    q_types = []
-    for item in question_types:
-        q_types.extend([q.strip().lower() for q in item.split(",") if q.strip()])
-
     # Validate Question Types
     valid_types = {t.value for t in QuestionType}
-    for qt in q_types:
-        if qt not in valid_types:
-             raise HTTPException(status_code=400, detail=f"Invalid question type: {qt}. Allowed: {valid_types}")
 
     question_type_counts: Dict[str, int] = json.loads(question_type_counts)
+    q_types = list(question_type_counts.keys())
+    
     for qtype, count in question_type_counts.items():
         if qtype not in valid_types:
             raise HTTPException(400, f"Unknown question type: {qtype}")
@@ -202,7 +196,7 @@ async def generate(
         str(difficulty),
         str(total_questions),
         str(question_type_counts),
-        str(sorted(question_types)), # Sort for consistency
+        str(sorted(q_types)), # Sort for consistency
         str(time_limit),
         str(topic_names),
         str(language),
@@ -369,7 +363,6 @@ async def generate_v2(
         '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}', 
         description='Default values: {"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}'
     ),
-    question_types: List[str] = Form(["mcq", "ftb", "mtf", "multichoice", "truefalse"], description="List of Question Types"),
     time_limit: Optional[int] = Form(None),
     topic_names: Optional[str] = Form(""),
     language: Language = Form(Language.ENGLISH),
@@ -410,16 +403,11 @@ async def generate_v2(
     if not c_ids and not valid_files:
         raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
 
-    q_types = []
-    for item in question_types:
-        q_types.extend([q.strip().lower() for q in item.split(",") if q.strip()])
-
     valid_types = {t.value for t in QuestionType}
-    for qt in q_types:
-        if qt not in valid_types:
-             raise HTTPException(status_code=400, detail=f"Invalid question type: {qt}. Allowed: {valid_types}")
 
     q_counts: Dict[str, int] = json.loads(question_type_counts)
+    q_types = list(q_counts.keys())
+    
     for qtype, count in q_counts.items():
         if qtype not in valid_types:
             raise HTTPException(400, f"Unknown question type: {qtype}")
@@ -437,7 +425,7 @@ async def generate_v2(
     import hashlib
     param_list = [
         str(assessment_type), str(difficulty), str(total_questions),
-        str(q_counts), str(sorted(question_types)), str(time_limit),
+        str(q_counts), str(sorted(q_types)), str(time_limit),
         str(topic_names), str(language), str(blooms_config), str(additional_instructions)
     ]
     if files:
@@ -592,6 +580,44 @@ async def download_csv_v2(job_id: str, user_id: str = Depends(get_current_user))
     generate_csv_v2(assessment_json, csv_path)
         
     return FileResponse(csv_path, filename=f"{job_id}_assessment_v2.csv", media_type='text/csv')
+
+@api_v2_router.get("/download_json/{job_id}")
+async def download_json_v2(job_id: str, user_id: str = Depends(get_current_user)):
+    data = await get_assessment_status(job_id)
+    if not data or data['status'] != 'COMPLETED':
+        raise HTTPException(status_code=404, detail="Assessment not ready or found")
+    
+    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    json_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.json"
+    
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(assessment_json, f, indent=2, ensure_ascii=False)
+        
+    return FileResponse(json_path, filename=f"{job_id}_assessment.json", media_type='application/json')
+
+@api_v2_router.get("/download_pdf/{job_id}")
+async def download_pdf_v2(job_id: str, user_id: str = Depends(get_current_user)):
+    data = await get_assessment_status(job_id)
+    if not data or data['status'] != 'COMPLETED':
+        raise HTTPException(status_code=404, detail="Assessment not ready or found")
+    
+    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    pdf_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.pdf"
+    
+    generate_pdf(assessment_json, pdf_path)
+    return FileResponse(pdf_path, filename=f"{job_id}_assessment.pdf", media_type='application/pdf')
+
+@api_v2_router.get("/download_docx/{job_id}")
+async def download_docx_v2(job_id: str, user_id: str = Depends(get_current_user)):
+    data = await get_assessment_status(job_id)
+    if not data or data['status'] != 'COMPLETED':
+        raise HTTPException(status_code=404, detail="Assessment not ready or found")
+    
+    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    docx_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.docx"
+    
+    generate_docx(assessment_json, docx_path)
+    return FileResponse(docx_path, filename=f"{job_id}_assessment.docx", media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 
 app.include_router(api_v1_router)

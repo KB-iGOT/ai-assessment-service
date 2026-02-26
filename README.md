@@ -203,7 +203,6 @@ Base URL: `http://localhost:8000/ai-assment-generation`
 - **Key Parameters**:
   - `course_ids` (List[str]): IDs of courses to process.
   - `assessment_type` (Enum): `practice`, `final`, `comprehensive`.
-  - `question_types` (List[str]): `mcq`, `ftb`, `mtf`.
   - `time_limit` (int): Duration in minutes.
   - `blooms_config` (JSON str): Optional Bloom's % map.
 - **Response**: `{"status": "PENDING", "job_id": "comprehensive_do_123..."}`

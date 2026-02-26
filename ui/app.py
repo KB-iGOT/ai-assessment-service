@@ -85,7 +85,6 @@ with tab_gen:
             
         # Construct Payload
         q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "multichoice": multi, "truefalse": tf}
-        q_types = [k for k,v in q_counts.items() if v > 0]
         
         payload = {
             'course_ids': course_ids_input,
@@ -94,7 +93,6 @@ with tab_gen:
             'difficulty': difficulty,
             'total_questions': sum(q_counts.values()),
             'question_type_counts': json.dumps(q_counts),
-            'question_types': ",".join(q_types),
             'language': language
         }
         
@@ -162,9 +160,9 @@ with tab_view:
             st.markdown("### 📥 Downloads")
             d1, d2, d3 = st.columns(3)
             # V2 CSV Link
-            d1.markdown(f"[**Download CSV (V2)**]({API_V2}/download_csv/{job_id})")
-            d2.markdown(f"[Download JSON]({API_BASE}/api/v1/download_json/{job_id})")
-            d3.markdown(f"[Download PDF]({API_BASE}/api/v1/download_pdf/{job_id})")
+            d1.markdown(f"[**Download CSV (V2)**]({API_V2}/download_csv/{job_id}?token={auth_token})")
+            d2.markdown(f"[Download JSON]({API_V2}/download_json/{job_id}?token={auth_token})")
+            d3.markdown(f"[Download PDF]({API_V2}/download_pdf/{job_id}?token={auth_token})")
 
             # EDITOR
             st.markdown("### ✏️ Interactive Editor")

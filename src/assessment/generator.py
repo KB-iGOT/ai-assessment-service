@@ -68,7 +68,6 @@ async def generate_assessment(
     course_ids: List[str] = None,
     topic_names: Optional[List[str]] = None,
     blooms_distribution: Optional[Dict[str, int]] = None,
-    question_types: List[str] = ["mcq", "ftb", "mtf"],
     time_limit: Optional[int] = None,
     extra_files: Optional[List[Path]] = None
 ) -> Tuple[Dict, Dict, Dict]:
@@ -204,8 +203,7 @@ async def generate_assessment(
         additional_instructions=additional_instructions,
         input_language=input_language,
         topic_names=topics_str,
-        blooms_distribution=blooms_str,
-        question_types=question_types
+        blooms_distribution=blooms_str
     )
     
     # 5. Call LLM
@@ -230,8 +228,7 @@ def build_prompt(
     additional_instructions: Optional[str],
     input_language: str,
     topic_names: str,
-    blooms_distribution: str,
-    question_types: List[str]
+    blooms_distribution: str
 ) -> str:
     prompt_template = ASSESSMENT_PROMPTS.get('system_prompt_template', '')
     
@@ -251,42 +248,40 @@ def build_prompt(
     # v3.3 Specifics (Question Types)
     if not question_type_counts:
         raise ValueError("question_type_counts cannot be empty.")
-    if not question_types:
-        raise ValueError("At least one question type must be specified in question_types.")
         
     q_instructions = ""
-    if "mcq" in question_types:
-        count = question_type_counts.get('mcq', 5)
+    if question_type_counts.get('mcq', 0) > 0:
+        count = question_type_counts['mcq']
         q_instructions += f"\n     - {count} Multiple Choice Questions (MCQs)"
     else:
         q_instructions += "\n     - 0 Multiple Choice Questions (MCQs) [DO NOT GENERATE]"
 
-    if "ftb" in question_types:
-        count = question_type_counts.get('ftb', 5)
+    if question_type_counts.get('ftb', 0) > 0:
+        count = question_type_counts['ftb']
         q_instructions += f"\n     - {count} Fill in the Blank Questions (FTBs)"
     else:
         q_instructions += "\n     - 0 Fill in the Blank Questions (FTBs) [DO NOT GENERATE]"
 
-    if "mtf" in question_types:
-        count = question_type_counts.get('mtf', 5)
+    if question_type_counts.get('mtf', 0) > 0:
+        count = question_type_counts['mtf']
         q_instructions += f"\n     - {count} Match the Following Questions (MTFs)"
     else:
         q_instructions += "\n     - 0 Match the Following Questions (MTFs) [DO NOT GENERATE]"
 
-    if "multichoice" in question_types:
-        count = question_type_counts.get('multichoice', 5)
+    if question_type_counts.get('multichoice', 0) > 0:
+        count = question_type_counts['multichoice']
         q_instructions += f"\n     - {count} Multi-Choice Questions"
     else:
         q_instructions += "\n     - 0 Multi-Choice Questions [DO NOT GENERATE]"
         
-    if "truefalse" in question_types:
-        count = question_type_counts.get('truefalse', 5)
+    if question_type_counts.get('truefalse', 0) > 0:
+        count = question_type_counts['truefalse']
         q_instructions += f"\n     - {count} True/False Questions"
     else:
         q_instructions += "\n     - 0 True/False Questions [DO NOT GENERATE]"
 
     prompt = prompt.replace("{question_type_instructions}", q_instructions)
-    logger.info(f"Q Counts: {question_type_counts} | Types: {question_types} | Inst: {q_instructions}")
+    logger.info(f"Q Counts: {question_type_counts} | Inst: {q_instructions}")
 
 
     # v3.2 Specifics
