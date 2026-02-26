@@ -64,30 +64,49 @@ docker-compose up --build
 
 ---
 
-## API Documentation (v2) - **Recommended**
+## 📚 API Reference (v2.0) - **Recommended**
+
+The V2 API is the robust, event-driven iteration of the assessment generator. It introduces **Authentication**, **Private Worksapces**, and Instant **Cloning**.
 
 - **Base URL**: `http://localhost:8000/ai-assment-generation/api/v2`
-- **Authentication**: All endpoints require `x-auth-token` header (JWT).
+- **Authentication**: All V2 endpoints require authentication.
+  - **Primary**: Pass the JWT in the `x-auth-token` header.
+  - **Fallback (Downloads)**: For browser-based file downloads where headers cannot be modified, pass the token as a URL query parameter: `?token=<jwt>`
 
-### 1. `POST /api/v2/generate`
-Smart generation endpoint with **Cloning** capabilities.
-- **Headers**: `x-auth-token: <jwt>`
-- **Logic**:
-  - If identical job exists (any user) -> **CLONES** result instantly (200 OK).
-  - If new -> Starts Async Job (202 ACCEPTED).
-- **Body**: Same as V1 (course_ids, assessment_type, difficulty, etc.)
+### 1. Generate Assessment (Async)
+- **Endpoint**: `POST /generate` (Multipart/Form-Data)
+- **Description**: Starts an event-driven generation job or instantly clones an existing one.
+- **Key Parameters**:
+  - `course_ids` (List[str]): IDs of courses to process.
+  - `assessment_type` (Enum): `practice`, `final`, `comprehensive`, `standalone`.
+  - `question_type_counts` (JSON): e.g., `{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 0, "truefalse": 0}`. The engine reads the keys to determine the types.
+  - `force` (bool): If true, bypasses the cache and forces a new generation.
+- **Response**: 
+  - `202 Accepted` (Status: `PENDING`) -> A new background worker job has started.
+  - `200 OK` (Status: `COMPLETED`) -> Cache hit. Instantly cloned into the user's workspace.
 
-### 2. `PUT /api/v2/assessment/{job_id}`
-Edit questions before finalizing.
-- **Access**: Only the **Owner** (creator/cloner) can edit.
+### 2. Check Status
+- **Endpoint**: `GET /status/{job_id}`
+- **Description**: Poll for job progress.
+- **Response**: Returns status (`PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`). When `COMPLETED`, the response includes the full `assessment_data` object.
+
+### 3. Update / Edit Assessment
+- **Endpoint**: `PUT /assessment/{job_id}`
+- **Description**: Allows the owner to manually edit the generated questions before finalizing.
 - **Body**: `{"assessment_data": { ... }}`
 
-### 3. `GET /api/v2/download_csv/{job_id}`
-Download result in the **V2 Schema** (7-Option Columns).
+### 4. Download Results
+All download endpoints return the actual generated file. They support the `?token=` query parameter.
+- **V2 Output Schema (CSV)**: `GET /download_csv/{job_id}` (Returns the robust 7-Option format)
+- **Standard JSON**: `GET /download_json/{job_id}`
+- **PDF Export**: `GET /download_pdf/{job_id}`
+- **Word (DOCX) Export**: `GET /download_docx/{job_id}`
+
+---
 
 ### Legacy V1 API
 - Still available at `/api/v1/...` for backward compatibility.
-- Does not support cloning or editing.
+- Does not support cloning, editing, or user separation.
 
 ---
 
