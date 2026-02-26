@@ -24,13 +24,13 @@ auth_token = st.sidebar.text_input("Auth Token (JWT)", type="password", help="En
 if not auth_token:
     st.sidebar.warning("⚠️ Auth Token is required for V2 API")
     
-debug_mode = st.sidebar.checkbox("Debug Mode", value=False)
+force_new = st.sidebar.checkbox("Bypass Cache (Force New)", value=False)
 
 # Headers helper
 def get_headers():
     return {
         "x-auth-token": auth_token,
-        "bg-bypass-cache": "true" if st.sidebar.checkbox("Bypass Cache (Force New)", value=False) else "false"
+        "bg-bypass-cache": "true" if force_new else "false"
     }
 
 st.title("🧩 Assessment Generator V2")
@@ -69,11 +69,12 @@ with tab_gen:
             )
             
         st.markdown("#### Question Counts")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         mcq = c1.number_input("MCQ", 0, 20, 5)
         ftb = c2.number_input("FTB", 0, 20, 5)
         mtf = c3.number_input("MTF", 0, 20, 5)
-        tf  = c4.number_input("True/False", 0, 20, 0)
+        multi = c4.number_input("Multi-Choice", 0, 20, 0)
+        tf  = c5.number_input("True/False", 0, 20, 0)
         
         uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
 
@@ -83,17 +84,12 @@ with tab_gen:
             st.stop()
             
         # Construct Payload
-        q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "truefalse": tf}
+        q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "multichoice": multi, "truefalse": tf}
         q_types = [k for k,v in q_counts.items() if v > 0]
         
         payload = {
             'course_ids': course_ids_input,
-            'force': 'true', # UI always forces new request logic? Or maybe rely on cache? 
-            # Actually, V2 automatically caches. Force=true breaks cache. 
-            # Let's verify 'bg-bypass-cache' header logic? 
-            # No, 'force' param in body controls it.
-            # Let's set force=False by default to test Cloning.
-            'force': 'false', 
+            'force': 'true' if force_new else 'false', 
             'assessment_type': assessment_type,
             'difficulty': difficulty,
             'total_questions': sum(q_counts.values()),
@@ -190,21 +186,35 @@ with tab_view:
                     st.markdown(f"**{q_type}**")
                     new_q_list = []
                     for i, q in enumerate(q_list):
-                        # Unique Key for widgets
                         qk = f"{q_type}_{i}"
-                        
-                        cols = st.columns([5, 1])
-                        # Edit Question Text
-                        updated_text = cols[0].text_area(f"Q{i+1}", q.get("question_text"), key=f"qtxt_{qk}")
-                        
-                        # Edit Answer (Simplification for UI)
-                        # We only allow editing text for now to keep UI simple
-                        
-                        # Reconstruct object
-                        updated_q = q.copy()
-                        updated_q['question_text'] = updated_text
-                        new_q_list.append(updated_q)
-                        
+                        with st.expander(f"Q{i+1}: {q.get('question_text', 'Match the following')[:50]}..."):
+                            cols = st.columns([5, 1])
+                            
+                            # Give a default title for MTF
+                            default_txt = q.get("question_text", "Match the following items appropriately:") if q_type == "MTF Question" else q.get("question_text", "")
+                            updated_text = cols[0].text_area(f"Edit Question Text", default_txt, key=f"qtxt_{qk}")
+                            
+                            # Restore Display of Options & Answers
+                            if q_type == "Multiple Choice Question":
+                                for opt in q.get("options", []):
+                                    st.write(f"- {opt.get('text', '')}")
+                                st.info(f"Answer: Option {q.get('correct_option_index')}")
+                            elif q_type == "Multi-Choice Question":
+                                for opt in q.get("options", []):
+                                    st.write(f"- {opt.get('text', '')}")
+                                st.info(f"Correct Options: {q.get('correct_option_index')}")
+                            elif q_type == "MTF Question":
+                                for p in q.get("pairs", []):
+                                    st.write(f"- {p.get('left')} → {p.get('right')}")
+                            else:
+                                st.info(f"Answer: {q.get('correct_answer')}")
+                            
+                            # Reconstruct object
+                            updated_q = q.copy()
+                            if q_type != "MTF Question":
+                                updated_q['question_text'] = updated_text
+                            new_q_list.append(updated_q)
+                            
                     new_questions_data[q_type] = new_q_list
                 
                 if st.form_submit_button("💾 Save Changes (PUT /api/v2)"):

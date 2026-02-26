@@ -25,7 +25,7 @@ Place your Google Cloud Service Account key file in the root as `credentials.jso
 ## 3. Deployment Commands
 
 ```bash
-# Build and start all services (DB, API, UI) in the background
+# Build and start all services (DB, Kafka, Zookeeper, API, Worker, UI) in the background
 docker-compose up -d --build
 ```
 

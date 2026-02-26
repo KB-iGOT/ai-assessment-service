@@ -109,7 +109,8 @@ def generate_html_content(assessment_data: dict) -> str:
         html_parts.append(f"<h3>{q_type} ({len(q_list)})</h3>")
         
         for q in q_list:
-            q_txt = q.get("question_text", "N/A")
+            default_q_txt = "Match the following items appropriately:" if q_type == "MTF Question" else "N/A"
+            q_txt = q.get("question_text", default_q_txt)
             q_html = f"""
             <div class="question-block">
                 <div class="question-text">Q{q_counter}: {q_txt}</div>
@@ -203,7 +204,8 @@ def generate_docx(assessment_data: dict, output_path: Path):
         doc.add_heading(f"{q_type} ({len(q_list)})", level=2)
         
         for i, q in enumerate(q_list, 1):
-            doc.add_paragraph(f"Q{i}: {q.get('question_text', 'N/A')}", style='List Number')
+            default_q_txt = "Match the following items appropriately:" if q_type == "MTF Question" else "N/A"
+            doc.add_paragraph(f"Q{i}: {q.get('question_text', default_q_txt)}", style='List Number')
             
             if q_type == "Multiple Choice Question":
                 for opt in q.get("options", []):

@@ -239,16 +239,21 @@ def build_prompt(
     prompt = prompt_template.replace("{course_context}", course_context)
     prompt = prompt.replace("{content_context}", f"TRANSCRIPTS:\n{transcript}\n\nPDF CONTENT:\n{pdf_snippets}")
     prompt = prompt.replace("{additional_instructions}", additional_instructions or "None provided")
-    prompt = prompt.replace("{input_language}", input_language)
+    prompt = prompt.replace("{input_language}", input_language or "English")
     prompt = prompt.replace("{kcm_dataset}", json.dumps(KCM_DATASET, indent=2))
     
-    prompt = prompt.replace("{assessment_type}", assessment_type)
-    prompt = prompt.replace("{difficulty_level}", difficulty_level)
+    prompt = prompt.replace("{assessment_type}", assessment_type or "comprehensive")
+    prompt = prompt.replace("{difficulty_level}", difficulty_level or "Medium")
     prompt = prompt.replace("{total_questions_x3}", str(total_questions))
     # prompt = prompt.replace("{total_questions_x3}", str(total_questions * len(question_types)))
     prompt = prompt.replace("{time_to_complete}", time_to_complete or "Not provided (use standard pacing)")
 
     # v3.3 Specifics (Question Types)
+    if not question_type_counts:
+        raise ValueError("question_type_counts cannot be empty.")
+    if not question_types:
+        raise ValueError("At least one question type must be specified in question_types.")
+        
     q_instructions = ""
     if "mcq" in question_types:
         count = question_type_counts.get('mcq', 5)
@@ -281,6 +286,7 @@ def build_prompt(
         q_instructions += "\n     - 0 True/False Questions [DO NOT GENERATE]"
 
     prompt = prompt.replace("{question_type_instructions}", q_instructions)
+    logger.info(f"Q Counts: {question_type_counts} | Types: {question_types} | Inst: {q_instructions}")
 
 
     # v3.2 Specifics

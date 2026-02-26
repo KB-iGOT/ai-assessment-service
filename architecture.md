@@ -11,19 +11,23 @@ graph TD
     User["Learner / Admin"] -- "UI (Streamlit)" --> UI["Frontend Service"]
     UI -- "REST API (Auth Token)" --> API["Assessment API (FastAPI)"]
     
-    subgraph "Assessment Service (Docker)"
-        API -- "Background Task" --> Worker["Async Worker"]
-        Worker -- "Read/Write" --> DB[("PostgreSQL")]
-        Worker -- "File I/O" --> FS["Shared Volume\n(interactive_courses_data)"]
-        Worker -- "Publish Events" --> Kafka["Kafka (Event Bus)"]
+    subgraph "Event-Driven Core"
+        API -- "Produces Request" --> KafkaInput["topic: assessment.request"]
+        KafkaInput -- "Consumes" --> Worker["Worker Service (Consumer)"]
+        Worker -- "Produces Result" --> KafkaOutput["topic: assessment.lifecycle"]
     end
     
-    API -.-> IdP["Identity Provider\n(Sunbird/Keycloak)"]
+    subgraph "Infrastructure"
+        Worker -- "Read/Write" --> DB[("PostgreSQL")]
+        Worker -- "File I/O" --> FS["Shared Volume"]
+    end
+    
+    API -.-> IdP["Identity Provider"]
     
     Worker -- "Search Content" --> KB["Karmayogi Platform APIs"]
-    Worker -- "Generate Content" --> Gemini["Google Vertex AI\n(Gemini 2.5 Pro)"]
+    Worker -- "Generate Content" --> Gemini["Google Vertex AI"]
     
-    API -- "Download (PDF/DOCX)" --> Exporter["Exporter Engine\n(WeasyPrint)"]
+    API -- "Download (PDF/DOCX)" --> Exporter["Exporter Engine"]
 ```
 
 ## 2. End-to-End Request Flow (Sequence)
@@ -57,10 +61,11 @@ sequenceDiagram
         
     else New Request (Async)
         API->>DB: Create Job (Status: PENDING)
-        API->>Worker: Dispatch Task
+        API->>Kafka: Publish Request (topic: assessment.request)
         API-->>User: 202 Accepted (Status: PENDING)
         
         par Background Processing
+            Kafka->>Worker: Consume Task
             Worker->>Worker: Update Status: IN_PROGRESS
             Worker->>Worker: Fetch & Process Content
             Worker->>LLM: Generate Assessment
@@ -70,7 +75,7 @@ sequenceDiagram
         end
         
         opt Polling (Legacy Fallback)
-            User->>API: GET /status/xyz
+            User->>API: GET /api/v2/status/xyz
             API-->>User: {"status": "COMPLETED"}
         end
     end

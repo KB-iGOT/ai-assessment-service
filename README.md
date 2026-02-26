@@ -5,11 +5,14 @@ An advanced, audit-ready assessment generation system powered by **Google Gemini
 ## Features
 - **Model**: Powered by `gemini-2.5-pro`.
 - **V2 Smart Architecture**: Authentication, Clone-on-Request (Instant Results), and Private Instances.
-- **Event-Driven**: Publishes `ASSESSMENT_COMPLETED` events to **Kafka**.
+- **Decoupled Worker**: Event-Driven Architecture splitting API (Producer) and Worker (Consumer) via Kafka.
+- **Event-Driven**: Publishes `ASSESSMENT_COMPLETED` events and consumes `ASSESSMENT_REQUESTED`.
 - **3 Assessment Types**: Practice (Reinforcement), Final (Certification), and Comprehensive (Cross-course).
+- **5 Question Types**: MCQ, Fill-in-the-Blank (FTB), Match-the-Following (MTF), Multi-Choice, and True/False.
 - **Multilingual Support**: Supports 10+ Indian languages (Hindi, Tamil, Telugu, etc.).
 - **KCM Alignment**: Maps questions strictly to the **Karmayogi Competency Model** (Behavioral/Functional).
 - **Explainable-AI**: Every question comes with alignment reasoning (Learning Objectives, KCM Competencies, Bloom's Justification).
+- **Dual Logging**: Console and native file logging (`logs/api.log` & `logs/worker.log`).
 - **Exportable Results**: Download assessments in structured JSON or flattened CSV (V2 Schema) formats.
 
 ---
@@ -39,22 +42,24 @@ docker-compose up --build
 - **Kafka**: localhost:29092
 
 ### Method 2: Hybrid Run (Local API + Docker Infra)
-1. **Start Infra**:
+1. **Start Infra (Kafka, Zookeeper, DB)**:
    ```bash
    ./docker-compose up -d db kafka zookeeper
    ```
-2. **Start API**:
-   ```bash
-   uv run uvicorn src.assessment.api:app --reload
-   ```
-2. **Start the API**:
+2. **Start API (Producer)**:
    ```bash
    export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-   uvicorn assessment.api:app --reload
+   uv run uvicorn assessment.api:app --reload
    ```
-3. **Start the UI**:
+3. **Start Worker (Consumer)**:
    ```bash
-   streamlit run ui/app.py
+   export PYTHONPATH=$PYTHONPATH:$(pwd)/src
+   uv run python -m assessment.worker_service
+   ```
+4. **Start the UI**:
+   ```bash
+   export PYTHONPATH=$PYTHONPATH:$(pwd)/src
+   uv run streamlit run ui/app.py
    ```
 
 ---

@@ -17,15 +17,20 @@ from .generator import generate_assessment
 from .generator import generate_assessment
 from .exporters import generate_pdf, generate_docx
 from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
-from .events import send_completion_event, stop_kafka_producer
+from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
+from .events import send_completion_event, stop_kafka_producer, send_request_event
 from .exporters_csv_v2 import generate_csv_v2
 
 # Configure Logging
+log_dir = Path("logs")
+log_dir.mkdir(exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.StreamHandler() # Good for Docker/K8s
+        logging.StreamHandler(), # Good for Docker/K8s
+        logging.FileHandler(log_dir / "api.log", encoding="utf-8")
     ]
 )
 logger = logging.getLogger("assessment-api")
@@ -48,9 +53,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Assessment API...")
 
 app = FastAPI(
-    title="Course Assessment Generator API (v1.0)",
-    description="Audit-ready assessment generation using Gemini 2.5 Pro",
-    version="1.0.0",
+    title="Course Assessment Generator API (v2.0)",
+    description="Audit-ready event-driven assessment generation using Gemini 2.5 Pro and Kafka",
+    version="2.0.0",
     lifespan=lifespan,
     root_path="/ai-assment-generation",
     servers=[{"url": "/ai-assment-generation", "description": "Default Server"}],
@@ -241,90 +246,28 @@ async def generate(
             saved_files.append(file_path)
             logger.info(f"Successfully saved uploaded file: {file.filename} to {file_path}")
 
-    background_tasks.add_task(
-        process_course_task, 
-        composite_id, 
-        c_ids, 
-        saved_files, 
-        assessment_type, 
-        difficulty, 
-        total_questions, 
-        question_type_counts,
-        additional_instructions, 
-        language,
-        t_names,
-        b_dist,
-        q_types,
-        time_limit
-    )
-    return {"message": "Generation started", "status": "PENDING", "job_id": composite_id}
+    # Construct Payload for Worker
+    worker_payload = {
+        "job_id": composite_id,
+        "user_id": "unknown", # V1 doesn't track user
+        "course_ids": c_ids,
+        "extra_files": [str(p) for p in saved_files],
+        "assessment_type": assessment_type.value if hasattr(assessment_type, 'value') else assessment_type,
+        "difficulty": difficulty.value if hasattr(difficulty, 'value') else difficulty,
+        "total_questions": total_questions,
+        "question_type_counts": q_counts,
+        "additional_instructions": additional_instructions,
+        "language": language.value if hasattr(language, 'value') else language,
+        "topic_names": t_names,
+        "blooms_distribution": b_dist,
+        "question_types": q_types,
+        "time_limit": time_limit
+    }
 
-async def process_course_task(
-    job_id: str, 
-    course_ids: List[str],
-    extra_files: List[Path], 
-    assessment_type: str, 
-    difficulty: str, 
-    total_questions: int, 
-    question_type_counts: Dict[str, int],
-    additional_instructions: Optional[str], 
-    language: str,
-    topic_names: Optional[List[str]],
-    blooms_distribution: Optional[Dict[str, int]],
-    question_types: List[str],
-    time_limit: Optional[int]
-):
-    try:
-        await update_job_status(job_id, "IN_PROGRESS")
-        
-        base_path = Path(INTERACTIVE_COURSES_PATH)
-        
-        # Fetch Data for ALL courses
-        for cid in course_ids:
-            success = await fetch_course_data(cid, base_path)
-            if not success:
-                logger.warning(f"Failed to fetch content for {cid}, proceeding with available data.")
-
-        # 3. Generate Assessment
-        metadata, assessment, usage = await generate_assessment(
-            course_ids=course_ids,
-            assessment_type=assessment_type, 
-            difficulty_level=difficulty, 
-            total_questions=total_questions,
-            question_type_counts=question_type_counts,
-            additional_instructions=additional_instructions,
-            input_language=language,
-            topic_names=topic_names,
-            blooms_distribution=blooms_distribution,
-            question_types=question_types,
-            time_limit=time_limit,
-            extra_files=extra_files
-        )
-        
-        # 4. Save Result
-        await save_assessment_result(job_id, metadata, assessment, usage)
-        
-        # 5. Send Kafka Event
-        # We need to retrieve user_id. Since process_course_task is background, 
-        # we might need to query it or pass it in. 
-        # Optimization: We can pass user_id as an argument or fetch from DB status.
-        # For now, let's fetch status again or just pass it to this function?
-        # Updating process_course_task signature is cleaner.
-        
-        # NOTE: job_id here is actually the 'user_job_id' or 'composite_id'.
-        # We can extract user_id if we passed it, OR fetch from DB.
-        
-        # Let's do a quick DB lookup to be safe/clean
-        job_data = await get_assessment_status(job_id)
-        u_id = job_data.get('user_id') if job_data else "unknown"
-        
-        await send_completion_event(job_id, u_id, "COMPLETED", {"course_ids": course_ids})
-        
-    except Exception as e:
-        logger.exception(f"Job failed for {job_id}")
-        await update_job_status(job_id, "FAILED", str(e))
-        # Optional: Send FAILED event?
-        # await send_completion_event(job_id, "unknown", "FAILED", {"error": str(e)})
+    # Dispatch to Kafka
+    await send_request_event(worker_payload)
+    
+    return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": composite_id}
 
 @api_v1_router.get("/download_csv/{job_id}")
 async def download_csv(job_id: str):
@@ -558,9 +501,9 @@ async def generate_v2(
     # Store with User Specific ID
     await create_job(user_job_id, user_id=user_id)
     
-    # Save files
     saved_files = []
     if files:
+        # Use first course ID for temp storage OR 'custom_uploads' folder if no course ID
         storage_folder_name = sorted_ids[0] if c_ids else "custom_uploads"
         temp_dir = Path(INTERACTIVE_COURSES_PATH) / storage_folder_name / "uploads"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -569,15 +512,31 @@ async def generate_v2(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             saved_files.append(file_path)
+            logger.info(f"Successfully saved uploaded file: {file.filename} to {file_path}")
 
-    background_tasks.add_task(
-        process_course_task, 
-        user_job_id, c_ids, saved_files, assessment_type, difficulty, 
-        total_questions, q_counts, additional_instructions, language,
-        t_names, b_dist, q_types, time_limit
-    )
+    # Construct Payload for Worker
+    worker_payload = {
+        "job_id": user_job_id, # Use user_job_id for the worker to process
+        "user_id": user_id, # V2: Pass real user_id
+        "course_ids": c_ids,
+        "extra_files": [str(p) for p in saved_files],
+        "assessment_type": assessment_type.value if hasattr(assessment_type, 'value') else assessment_type,
+        "difficulty": difficulty.value if hasattr(difficulty, 'value') else difficulty,
+        "total_questions": total_questions,
+        "question_type_counts": q_counts,
+        "additional_instructions": additional_instructions,
+        "language": language.value if hasattr(language, 'value') else language,
+        "topic_names": t_names,
+        "blooms_distribution": b_dist,
+        "question_types": q_types,
+        "time_limit": time_limit
+    }
+
+    # Dispatch to Kafka
+    print("DEBUG WORKER PAYLOAD:", worker_payload)
+    await send_request_event(worker_payload)
     
-    return {"message": "Generation started", "status": "PENDING", "job_id": user_job_id}
+    return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": user_job_id}
 
 @api_v2_router.get("/status/{job_id}")
 async def check_status_v2(job_id: str, user_id: str = Depends(get_current_user)):

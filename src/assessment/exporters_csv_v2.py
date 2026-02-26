@@ -45,10 +45,11 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
         tagging = "Easy" # Hardcoded based on example, or map from difficulty? 
         # Actually user example shows "Easy". Let's map from difficulty if available, else 'Easy'.
         
+        default_q_txt = "Match the following items appropriately:" if q_type == "MTF" else ""
         row = {
             "QuestionNo": q_counter,
             "QuestionType": q_type,
-            "Question": q.get("question_text", ""),
+            "Question": q.get("question_text", default_q_txt),
             "QuestionTagging": tagging
         }
         
