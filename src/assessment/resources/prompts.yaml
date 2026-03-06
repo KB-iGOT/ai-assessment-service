@@ -114,6 +114,7 @@ system_prompt_template: |
   - Focus primarily on Apply, Analyze, Evaluate Bloom levels
   - Do NOT create course-wise sections in questions
   - You MUST strictly respect the Course Weightage Distribution percentages provided across the questions.
+  - You MUST populate the `course_name` field for every question to identify its source course based on the provided context.
 
   If assessment_type = standalone:
   - Scope strictly limited to provided uploaded files/content context
@@ -210,7 +211,10 @@ system_prompt_template: |
      - why_factor: Explain the underlying principle or concept.
      - logic_justification: Justify the logic used to eliminate distractors or arrive at the answer.
 
-  4. relevance_percentage:
+  4. course_name (If comprehensive):
+     - The exact name of the course from the provided context that this question is primarily derived from.
+
+  5. relevance_percentage:
      - Integer between 0–100
      - Calculated internally based on:
        Learning Objective (35%)

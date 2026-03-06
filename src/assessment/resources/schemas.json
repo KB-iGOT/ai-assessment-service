@@ -176,6 +176,9 @@
                 "relevance_percentage": {
                   "type": "integer"
                 },
+                "course_name": {
+                  "type": "string"
+                },
                 "answer_rationale": {
                   "type": "object",
                   "properties": {
@@ -284,6 +287,9 @@
                 },
                 "relevance_percentage": {
                   "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
                 },
                 "answer_rationale": {
                   "type": "object",
@@ -404,6 +410,9 @@
                 },
                 "relevance_percentage": {
                   "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
                 },
                 "answer_rationale": {
                   "type": "object",
@@ -537,6 +546,9 @@
                 "relevance_percentage": {
                   "type": "integer"
                 },
+                "course_name": {
+                  "type": "string"
+                },
                 "answer_rationale": {
                   "type": "object",
                   "properties": {
@@ -649,6 +661,9 @@
                 },
                 "relevance_percentage": {
                   "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
                 },
                 "answer_rationale": {
                   "type": "object",

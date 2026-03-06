@@ -575,6 +575,7 @@ async def update_assessment(
 async def download_csv_v2(job_id: str, user_id: str = Depends(get_current_user)):
     """
     V2 Export: Returns CSV in the specific 7-Option Column format.
+    Includes Answer Rationale and Course Tagging metadata.
     """
     data = await get_assessment_status(job_id)
     if not data or data['status'] != 'COMPLETED':

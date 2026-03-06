@@ -140,6 +140,7 @@ Use this to display the "Audit" or "Design rationale" to the user.
 
 #### **`questions`**
 Contains three arrays: `Multiple Choice Question`, `FTB Question`, and `MTF Question`.
+- **Course Tagging**: Every question includes a `course_name` property designating the source course (visible as `QuestionTagging` in CSV exports, especially utilized in `comprehensive` assessments).
 - **Answer Rationale**: Every question has an `answer_rationale` object containing:
   - `correct_answer_explanation`
   - `why_factor`

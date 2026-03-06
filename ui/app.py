@@ -200,7 +200,11 @@ with tab_view:
                     new_q_list = []
                     for i, q in enumerate(q_list):
                         qk = f"{q_type}_{i}"
-                        with st.expander(f"Q{i+1}: {q.get('question_text', 'Match the following')[:50]}..."):
+                        
+                        course_tag = f" [{q.get('course_name')}]" if q.get("course_name") else ""
+                        title_text = f"Q{i+1}{course_tag}: {q.get('question_text', 'Match the following')[:50]}..."
+                        
+                        with st.expander(title_text):
                             cols = st.columns([5, 1])
                             
                             # Give a default title for MTF

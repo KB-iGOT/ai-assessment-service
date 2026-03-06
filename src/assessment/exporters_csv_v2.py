@@ -43,8 +43,7 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
     for item in all_questions:
         q = item["raw"]
         q_type = item["type"]
-        tagging = "Easy" # Hardcoded based on example, or map from difficulty? 
-        # Actually user example shows "Easy". Let's map from difficulty if available, else 'Easy'.
+        tagging = q.get("course_name", "N/A") # Fallback if not comprehensive / LLM fails
         
         default_q_txt = "" 
         if q_type == "MTF":
