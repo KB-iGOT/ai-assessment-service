@@ -167,6 +167,7 @@ system_prompt_template: |
   MTF:
   - Balanced pairs
   - No giveaway mappings
+  - Clearly state the matching context (e.g., "Match the Competency with its Description", "Match the Policy to its Objective")
 
   Multi-Choice:
   - 4 or more options
@@ -199,13 +200,23 @@ system_prompt_template: |
      - question_type_rationale
      - assessment_type_relevance
 
-  3. relevance_percentage:
+  4. answer_rationale:
+     - correct_answer_explanation: Detail why the correct answer is correct based on the text.
+     - why_factor: Explain the underlying principle or concept.
+     - logic_justification: Justify the logic used to eliminate distractors or arrive at the answer.
+
+  5. relevance_percentage:
      - Integer between 0–100
      - Calculated internally based on:
        Learning Objective (35%)
        Competency Alignment (30%)
        Bloom Match (20%)
        Assessment Fit (15%)
+
+  ------------------------------------------------------------
+  MATCH THE FOLLOWING SPECIFICS
+  ------------------------------------------------------------
+  - If question_type is "MTF" you MUST generate a `matching_context` key denoting the context of the match.
 
   ------------------------------------------------------------
   OUTPUT FORMAT (STRICT)

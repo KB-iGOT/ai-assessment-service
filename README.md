@@ -139,11 +139,16 @@ Use this to display the "Audit" or "Design rationale" to the user.
 
 #### **`questions`**
 Contains three arrays: `Multiple Choice Question`, `FTB Question`, and `MTF Question`.
+- **Answer Rationale**: Every question has an `answer_rationale` object containing:
+  - `correct_answer_explanation`
+  - `why_factor`
+  - `logic_justification`
 - **Reasoning**: Every question has a `reasoning` object containing:
   - `learning_objective_alignment`
   - `competency_alignment`: Nested object with `kcm` (area, theme, sub_theme) and `domain`.
   - `blooms_level_justification`
   - `relevance_percentage`: 0-100 score.
+- **MTF Note**: `MTF Question` objects use `matching_context` instead of `question_text`.
 
 ### 4. Direct Downloads
 - `http://api-url/ai-assment-generation/api/v1/download/{course_id}` (CSV)

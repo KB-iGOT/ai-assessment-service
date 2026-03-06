@@ -200,8 +200,12 @@ with tab_view:
                             cols = st.columns([5, 1])
                             
                             # Give a default title for MTF
-                            default_txt = q.get("question_text", "Match the following items appropriately:") if q_type == "MTF Question" else q.get("question_text", "")
-                            updated_text = cols[0].text_area(f"Edit Question Text", default_txt, key=f"qtxt_{qk}")
+                            if q_type == "MTF Question":
+                                default_txt = q.get("matching_context", q.get("question_text", "Match the following items appropriately:"))
+                            else:
+                                default_txt = q.get("question_text", "")
+                            
+                            updated_text = cols[0].text_area(f"Edit Text/Context", default_txt, key=f"qtxt_{qk}")
                             
                             # Restore Display of Options & Answers
                             if q_type == "Multiple Choice Question":
@@ -218,10 +222,20 @@ with tab_view:
                             else:
                                 st.info(f"Answer: {q.get('correct_answer')}")
                             
+                            # Display Rationale
+                            rationale = q.get("answer_rationale", {})
+                            if rationale:
+                                with st.expander("Show Answer Rationale"):
+                                    st.write(f"**Explanation:** {rationale.get('correct_answer_explanation', 'N/A')}")
+                                    st.write(f"**Why Factor:** {rationale.get('why_factor', 'N/A')}")
+                                    st.write(f"**Logic:** {rationale.get('logic_justification', 'N/A')}")
+
                             # Reconstruct object
                             updated_q = q.copy()
                             if q_type != "MTF Question":
                                 updated_q['question_text'] = updated_text
+                            else:
+                                updated_q['matching_context'] = updated_text
                             new_q_list.append(updated_q)
                             
                     new_questions_data[q_type] = new_q_list

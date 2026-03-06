@@ -14,6 +14,7 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
     headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging"]
     for i in range(1, 8):
         headers.extend([f"Option{i}", f"isOption{i}Correct"])
+    headers.extend(["Explanation", "Why Factor", "Logic Justification"])
         
     rows = []
     questions_obj = assessment_data.get("questions", {})
@@ -45,13 +46,22 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
         tagging = "Easy" # Hardcoded based on example, or map from difficulty? 
         # Actually user example shows "Easy". Let's map from difficulty if available, else 'Easy'.
         
-        default_q_txt = "Match the following items appropriately:" if q_type == "MTF" else ""
+        default_q_txt = "" 
+        if q_type == "MTF":
+            # Extract Matching Context and Prepend it
+            context = q.get("matching_context", "Match the following items appropriately:")
+            default_q_txt = f"{context}\n\n" if context else "Match the following items appropriately:\n\n"
+        
         row = {
             "QuestionNo": q_counter,
             "QuestionType": q_type,
-            "Question": q.get("question_text", default_q_txt),
+            "Question": q.get("question_text", f"{default_q_txt}"),
             "QuestionTagging": tagging
         }
+        
+        # Override the MTF string to only contain the context since it lacks a QuestionText itself
+        if q_type == "MTF":
+           row["Question"] = q.get("matching_context", "Match the following items appropriately:")
         
         # Populate Options columns (Default empty)
         for i in range(1, 8):
@@ -141,6 +151,12 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
                  # Single string?
                  row["Option1"] = str(correct_ans)
                  row["isOption1Correct"] = "Blank1"
+
+        # Add Rationale
+        rationale = q.get("answer_rationale", {})
+        row["Explanation"] = rationale.get("correct_answer_explanation", "")
+        row["Why Factor"] = rationale.get("why_factor", "")
+        row["Logic Justification"] = rationale.get("logic_justification", "")
 
         rows.append(row)
         q_counter += 1
