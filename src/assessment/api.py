@@ -10,8 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 
-from .config import INTERACTIVE_COURSES_PATH
-from .db import init_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result
+from .db import init_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
 from .fetcher import fetch_course_data
 from .generator import generate_assessment
 from .generator import generate_assessment
@@ -630,6 +629,31 @@ async def download_docx_v2(job_id: str, user_id: str = Depends(get_current_user)
     generate_docx(assessment_json, docx_path)
     return FileResponse(docx_path, filename=f"{job_id}_assessment.docx", media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
+@api_v2_router.get("/history")
+async def get_history(user_id: str = Depends(get_current_user)):
+    """
+    Returns a list of all assessments previously generated or cloned by the authenticated user.
+    """
+    history = await get_user_assessments_history(user_id)
+    
+    # Clean up metadata string output
+    formatted_history = []
+    for item in history:
+        try:
+            meta = json.loads(item.get("metadata", "{}")) if item.get("metadata") else {}
+        except Exception:
+            meta = {}
+            
+        formatted_history.append({
+            "job_id": item.get("job_id"),
+            "status": item.get("status"),
+            "created_at": item.get("created_at").isoformat() if item.get("created_at") else None,
+            "updated_at": item.get("updated_at").isoformat() if item.get("updated_at") else None,
+            "config": meta.get("config", {}),
+            "error_message": item.get("error_message")
+        })
+        
+    return formatted_history
 
 app.include_router(api_v1_router)
 app.include_router(api_v2_router)

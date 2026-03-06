@@ -37,7 +37,7 @@ st.title("🧩 Assessment Generator V2")
 st.markdown("Test the full **Generate -> Clone -> Edit -> Event** lifecycle.")
 
 # --- Tab Layout ---
-tab_gen, tab_view = st.tabs(["🚀 Generate / Clone", "📝 View & Edit Result"])
+tab_gen, tab_view, tab_history = st.tabs(["🚀 Generate / Clone", "📝 View & Edit Result", "🗂️ History"])
 
 # ==========================================
 # TAB 1: GENERATE
@@ -269,3 +269,68 @@ with tab_view:
                             st.error(f"Save Failed: {r_upd.text}")
                     except Exception as e:
                         st.error(f"Update Error: {e}")
+
+# ==========================================
+# TAB 3: HISTORY
+# ==========================================
+with tab_history:
+    st.markdown("### 🗂️ Your Assessment History")
+    st.info("View previously generated tests. Ensure you have provided your Auth Token in the sidebar.")
+    
+    if st.button("🔄 Refresh History"):
+        if not auth_token:
+            st.warning("Enter your Auth Token to retrieve history.")
+        else:
+            with st.spinner("Fetching history..."):
+                try:
+                    r_hist = requests.get(f"{API_V2}/history", headers=get_headers())
+                    if r_hist.status_code == 200:
+                        st.session_state['history_data'] = r_hist.json()
+                    else:
+                        st.error(f"Failed to fetch history: {r_hist.text}")
+                except Exception as e:
+                    st.error(f"Error fetching history: {e}")
+
+    history_items = st.session_state.get('history_data', [])
+    
+    if history_items:
+        for idx, item in enumerate(history_items):
+            job_id = item.get("job_id", "Unknown")
+            status = item.get("status", "Unknown")
+            updated = item.get("updated_at", "Unknown")
+            config = item.get("config", {})
+            
+            # Status badge logic
+            status_emoji = "⏳"
+            if status == "COMPLETED": status_emoji = "✅"
+            elif status == "FAILED": status_emoji = "❌"
+            elif status == "PENDING": status_emoji = "🕒"
+            
+            with st.expander(f"{status_emoji} Job: {job_id} | Updated: {updated[:10]}", expanded=(idx == 0)):
+                cols = st.columns([2, 1])
+                
+                with cols[0]:
+                    st.markdown("**Configuration Used:**")
+                    if config:
+                        st.write(f"- **Type:** {config.get('assessment_type', 'N/A')}")
+                        st.write(f"- **Difficulty:** {config.get('difficulty', 'N/A')}")
+                        st.write(f"- **Language:** {config.get('language', 'N/A')}")
+                        st.write(f"- **Total Questions:** {config.get('total_questions', 'N/A')}")
+                        if config.get('course_weightage'):
+                            st.write(f"- **Course Weightage:** `{config.get('course_weightage')}`")
+                    else:
+                        st.write("No configuration metadata available (Legacy Job).")
+                
+                with cols[1]:
+                    st.markdown("**Actions:**")
+                    if status == "COMPLETED":
+                        if st.button("Load into Editor", key=f"load_{job_id}"):
+                            st.session_state['current_job_id'] = job_id
+                            st.success(f"Job {job_id} loaded! Switch to 'View & Edit Result' tab.")
+                        
+                        # Downloads
+                        st.markdown(f"[Download CSV]({API_V2}/download_csv/{job_id}?token={auth_token}) | [Download PDF]({API_V2}/download_pdf/{job_id}?token={auth_token})")
+                    else:
+                        st.write(f"*Job is {status}* ‒ wait for completion.")
+    elif history_items == []:
+         st.write("No history found for your account.")

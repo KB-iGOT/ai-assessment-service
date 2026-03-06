@@ -75,6 +75,17 @@ async def process_job(payload: Dict[str, Any]):
             extra_files=extra_files
         )
         
+        # Inject API Configuration into Metadata
+        metadata['config'] = {
+            "assessment_type": payload.get('assessment_type'),
+            "difficulty": payload.get('difficulty'),
+            "total_questions": payload.get('total_questions'),
+            "question_type_counts": payload.get('question_type_counts'),
+            "language": payload.get('language'),
+            "time_limit": payload.get('time_limit'),
+            "course_weightage": payload.get('course_weightage')
+        }
+        
         # 5. Save Result
         await save_assessment_result(job_id, metadata, assessment, usage)
         

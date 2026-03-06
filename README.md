@@ -98,7 +98,12 @@ The V2 API is the robust, event-driven iteration of the assessment generator. It
 - **Description**: Allows the owner to manually edit the generated questions before finalizing.
 - **Body**: `{"assessment_data": { ... }}`
 
-### 4. Download Results
+### 4. Fetch User History
+- **Endpoint**: `GET /history`
+- **Description**: Returns a clean listing of all previous assessments initiated by the authenticated user.
+- **Response**: Array of objects containing `job_id`, `status`, `created_at`, `updated_at`, and `config` metadata.
+
+### 5. Download Results
 All download endpoints return the actual generated file. They support the `?token=` query parameter.
 - **V2 Output Schema (CSV)**: `GET /download_csv/{job_id}` (Returns the robust 7-Option format)
 - **Standard JSON**: `GET /download_json/{job_id}`

@@ -137,3 +137,19 @@ async def update_job_result(job_id: str, user_id: str, new_assessment_data: dict
         return result != "UPDATE 0"
     finally:
         await conn.close()
+
+async def get_user_assessments_history(user_id: str) -> List[Dict[str, Any]]:
+    """
+    Fetches the assessment history for a specific user.
+    """
+    conn = await asyncpg.connect(DB_DSN)
+    try:
+        rows = await conn.fetch("""
+            SELECT course_id as job_id, status, created_at, updated_at, metadata, error_message
+            FROM interactive_assessments
+            WHERE user_id = $1
+            ORDER BY updated_at DESC
+        """, user_id)
+        return [dict(row) for row in rows]
+    finally:
+        await conn.close()
