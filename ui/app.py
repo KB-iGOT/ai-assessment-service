@@ -80,6 +80,7 @@ with tab_gen:
         adv1, adv2 = st.columns(2)
         with adv1:
             enable_blooms = st.checkbox("Enable Bloom's Taxonomy", value=True, help="If disabled, relies purely on Difficulty level")
+            course_weightage = st.text_input("Course Weightage JSON (Optional)", value="", help='e.g., {"do_course1": 60, "do_course2": 40}')
         with adv2:
             time_limit = st.number_input("Time Limit (Minutes)", min_value=0, value=0, help="0 means no limit. Influences cognitive depth of questions.")
         
@@ -103,6 +104,9 @@ with tab_gen:
             'language': language,
             'enable_blooms': 'true' if enable_blooms else 'false'
         }
+        
+        if course_weightage.strip():
+            payload['course_weightage'] = course_weightage.strip()
         
         if time_limit > 0:
             payload['time_limit'] = time_limit

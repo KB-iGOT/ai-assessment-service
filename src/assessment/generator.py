@@ -69,6 +69,7 @@ async def generate_assessment(
     topic_names: Optional[List[str]] = None,
     blooms_distribution: Optional[Dict[str, int]] = None,
     enable_blooms: bool = True,
+    course_weightage: Optional[str] = None,
     time_limit: Optional[int] = None,
     extra_files: Optional[List[Path]] = None
 ) -> Tuple[Dict, Dict, Dict]:
@@ -197,7 +198,17 @@ async def generate_assessment(
     # 3. Format Topics
     topics_str = ", ".join(topic_names) if topic_names else "None specific (Cover all modules)"
 
-    # 4. Build Prompt
+    # 4. Format Course Weightage
+    course_weightage_instruction = "Distribute questions roughly equally across courses, anchored by their content depth."
+    if course_weightage:
+        try:
+            weights_dict = json.loads(course_weightage) if isinstance(course_weightage, str) else course_weightage
+            instruction_list = [f"{cid}: {weight}%" for cid, weight in weights_dict.items()]
+            course_weightage_instruction = "Distribute the generated questions STRICTLY according to the following percentages:\n" + "\n".join(instruction_list)
+        except Exception as e:
+            logger.warning(f"Failed to parse course weightage '{course_weightage}' - falling back to equal distribution. Error: {e}")
+
+    # 5. Build Prompt
     prompt = build_prompt(
         question_type_counts=question_type_counts,
         course_context=json.dumps(aggregated_metadata, indent=2),
@@ -210,10 +221,11 @@ async def generate_assessment(
         additional_instructions=additional_instructions,
         input_language=input_language,
         topic_names=topics_str,
-        blooms_distribution=blooms_str
+        blooms_distribution=blooms_str,
+        course_weightage_instruction=course_weightage_instruction
     )
     
-    # 5. Call LLM
+    # 6. Call LLM
     response_text, usage = await call_llm(prompt)
     
     try:
@@ -235,7 +247,8 @@ def build_prompt(
     additional_instructions: Optional[str],
     input_language: str,
     topic_names: str,
-    blooms_distribution: str
+    blooms_distribution: str,
+    course_weightage_instruction: str
 ) -> str:
     prompt_template = ASSESSMENT_PROMPTS.get('system_prompt_template', '')
     
@@ -249,8 +262,8 @@ def build_prompt(
     prompt = prompt.replace("{assessment_type}", assessment_type or "comprehensive")
     prompt = prompt.replace("{difficulty_level}", difficulty_level or "Medium")
     prompt = prompt.replace("{total_questions_x3}", str(total_questions))
-    # prompt = prompt.replace("{total_questions_x3}", str(total_questions * len(question_types)))
     prompt = prompt.replace("{time_to_complete}", time_to_complete or "Not provided (use standard pacing)")
+    prompt = prompt.replace("{course_weightage_instruction}", course_weightage_instruction)
 
     # v3.3 Specifics (Question Types)
     if not question_type_counts:

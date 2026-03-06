@@ -65,6 +65,9 @@ system_prompt_template: |
         competencies.
       - Competency structure:
         competency_area → competency_theme → competency_sub_theme
+        
+  11. Course Weightage Distribution:
+      {course_weightage_instruction}
 
   ------------------------------------------------------------
   LANGUAGE GOVERNANCE RULES (NON-NEGOTIABLE)
@@ -110,6 +113,7 @@ system_prompt_template: |
   - Prefer cross-course, real-world scenario questions
   - Focus primarily on Apply, Analyze, Evaluate Bloom levels
   - Do NOT create course-wise sections in questions
+  - You MUST strictly respect the Course Weightage Distribution percentages provided across the questions.
 
   If assessment_type = standalone:
   - Scope strictly limited to provided uploaded files/content context
@@ -201,12 +205,12 @@ system_prompt_template: |
      - question_type_rationale
      - assessment_type_relevance
 
-  4. answer_rationale:
+  3. answer_rationale:
      - correct_answer_explanation: Detail why the correct answer is correct based on the text.
      - why_factor: Explain the underlying principle or concept.
      - logic_justification: Justify the logic used to eliminate distractors or arrive at the answer.
 
-  5. relevance_percentage:
+  4. relevance_percentage:
      - Integer between 0–100
      - Calculated internally based on:
        Learning Objective (35%)

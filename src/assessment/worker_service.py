@@ -70,6 +70,7 @@ async def process_job(payload: Dict[str, Any]):
             topic_names=payload.get('topic_names'),
             blooms_distribution=payload.get('blooms_distribution'),
             enable_blooms=payload.get('enable_blooms', True),
+            course_weightage=payload.get('course_weightage'),
             time_limit=payload.get('time_limit'),
             extra_files=extra_files
         )

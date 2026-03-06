@@ -138,6 +138,7 @@ async def generate(
         description="JSON string of Bloom's %"
     ),
     enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
+    course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
     additional_instructions: Optional[str] = Form(""),
     files: Optional[List[Union[UploadFile, str]]] = File(None)
 ):
@@ -203,6 +204,7 @@ async def generate(
         str(language),
         str(blooms_config),
         str(enable_blooms),
+        str(course_weightage),
         str(additional_instructions)
     ]
     if files:
@@ -257,6 +259,7 @@ async def generate(
         "topic_names": t_names,
         "blooms_distribution": b_dist,
         "enable_blooms": enable_blooms,
+        "course_weightage": course_weightage,
         "question_types": q_types,
         "time_limit": time_limit
     }
@@ -370,10 +373,11 @@ async def generate_v2(
     topic_names: Optional[str] = Form(""),
     language: Language = Form(Language.ENGLISH),
     blooms_config: Optional[str] = Form(
-        '{"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Evaluate": 10, "Create": 0}',
+        '{"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Analyze": 10, "Evaluate": 10, "Create": 0}',
         description="JSON string of Bloom's %"
     ),
     enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
+    course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
     additional_instructions: Optional[str] = Form(""),
     files: Optional[List[Union[UploadFile, str]]] = File(None)
 ):
@@ -430,7 +434,7 @@ async def generate_v2(
     param_list = [
         str(assessment_type), str(difficulty), str(total_questions),
         str(q_counts), str(sorted(q_types)), str(time_limit),
-        str(topic_names), str(language), str(blooms_config), str(enable_blooms), str(additional_instructions)
+        str(topic_names), str(language), str(blooms_config), str(enable_blooms), str(course_weightage), str(additional_instructions)
     ]
     if files:
          param_list.extend([f.filename for f in valid_files])
@@ -521,6 +525,7 @@ async def generate_v2(
         "topic_names": t_names,
         "blooms_distribution": b_dist,
         "enable_blooms": enable_blooms,
+        "course_weightage": course_weightage,
         "question_types": q_types,
         "time_limit": time_limit
     }

@@ -82,6 +82,7 @@ The V2 API is the robust, event-driven iteration of the assessment generator. It
   - `question_type_counts` (JSON): e.g., `{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 0, "truefalse": 0}`. The engine reads the keys to determine the types.
   - `force` (bool): If true, bypasses the cache and forces a new generation.
   - `enable_blooms` (bool): If false, disables strict Bloom's balancing.
+  - `course_weightage` (JSON str, optional): For comprehensive assessments, define percentage weights per course (e.g. `{"course1": 60, "course2": 40}`).
   - `time_limit` (int): Duration in minutes. Short duration shifts questions to recall/understand, long duration shifts to analyze/apply.
 - **Response**: 
   - `202 Accepted` (Status: `PENDING`) -> A new background worker job has started.
