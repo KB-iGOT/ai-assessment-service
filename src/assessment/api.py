@@ -137,6 +137,7 @@ async def generate(
         '{"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Evaluate": 10, "Create": 0}',
         description="JSON string of Bloom's %"
     ),
+    enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
     additional_instructions: Optional[str] = Form(""),
     files: Optional[List[Union[UploadFile, str]]] = File(None)
 ):
@@ -201,6 +202,7 @@ async def generate(
         str(topic_names),
         str(language),
         str(blooms_config),
+        str(enable_blooms),
         str(additional_instructions)
     ]
     if files:
@@ -254,6 +256,7 @@ async def generate(
         "language": language.value if hasattr(language, 'value') else language,
         "topic_names": t_names,
         "blooms_distribution": b_dist,
+        "enable_blooms": enable_blooms,
         "question_types": q_types,
         "time_limit": time_limit
     }
@@ -370,6 +373,7 @@ async def generate_v2(
         '{"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Evaluate": 10, "Create": 0}',
         description="JSON string of Bloom's %"
     ),
+    enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
     additional_instructions: Optional[str] = Form(""),
     files: Optional[List[Union[UploadFile, str]]] = File(None)
 ):
@@ -426,7 +430,7 @@ async def generate_v2(
     param_list = [
         str(assessment_type), str(difficulty), str(total_questions),
         str(q_counts), str(sorted(q_types)), str(time_limit),
-        str(topic_names), str(language), str(blooms_config), str(additional_instructions)
+        str(topic_names), str(language), str(blooms_config), str(enable_blooms), str(additional_instructions)
     ]
     if files:
          param_list.extend([f.filename for f in valid_files])
@@ -516,6 +520,7 @@ async def generate_v2(
         "language": language.value if hasattr(language, 'value') else language,
         "topic_names": t_names,
         "blooms_distribution": b_dist,
+        "enable_blooms": enable_blooms,
         "question_types": q_types,
         "time_limit": time_limit
     }

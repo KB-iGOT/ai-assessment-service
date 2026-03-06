@@ -68,6 +68,7 @@ async def generate_assessment(
     course_ids: List[str] = None,
     topic_names: Optional[List[str]] = None,
     blooms_distribution: Optional[Dict[str, int]] = None,
+    enable_blooms: bool = True,
     time_limit: Optional[int] = None,
     extra_files: Optional[List[Path]] = None
 ) -> Tuple[Dict, Dict, Dict]:
@@ -177,10 +178,16 @@ async def generate_assessment(
     final_pdf_str = "\n\n".join(combined_pdfs) if combined_pdfs else "N/A"
     
     # 2. Format Bloom's Distribution
-    if not blooms_distribution:
-        # Default Logic
-        if assessment_type == "comprehensive":
-            blooms_str = "Apply: 40%, Analyze: 30%, Evaluate: 30%"
+    if not enable_blooms:
+        blooms_str = "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
+    elif not blooms_distribution:
+        # Dynamic defaults based on Difficulty Level (PRD Requirement)
+        if difficulty_level.lower() == "beginner":
+            blooms_str = "Remember: 40%, Understand: 40%, Apply: 20%"
+        elif difficulty_level.lower() == "intermediate":
+            blooms_str = "Remember: 20%, Understand: 30%, Apply: 30%, Analyze: 20%"
+        elif difficulty_level.lower() == "advanced":
+             blooms_str = "Apply: 20%, Analyze: 40%, Evaluate: 30%, Create: 10%"
         else:
             blooms_str = "Remember: 20%, Understand: 25%, Apply: 25%, Analyze: 20%, Evaluate: 10%"
     else:

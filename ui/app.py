@@ -76,6 +76,13 @@ with tab_gen:
         multi = c4.number_input("Multi-Choice", 0, 20, 0)
         tf  = c5.number_input("True/False", 0, 20, 0)
         
+        st.markdown("#### Advanced Settings")
+        adv1, adv2 = st.columns(2)
+        with adv1:
+            enable_blooms = st.checkbox("Enable Bloom's Taxonomy", value=True, help="If disabled, relies purely on Difficulty level")
+        with adv2:
+            time_limit = st.number_input("Time Limit (Minutes)", min_value=0, value=0, help="0 means no limit. Influences cognitive depth of questions.")
+        
         uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
 
     if st.button("Start Generation (V2)", type="primary"):
@@ -93,8 +100,12 @@ with tab_gen:
             'difficulty': difficulty,
             'total_questions': sum(q_counts.values()),
             'question_type_counts': json.dumps(q_counts),
-            'language': language
+            'language': language,
+            'enable_blooms': 'true' if enable_blooms else 'false'
         }
+        
+        if time_limit > 0:
+            payload['time_limit'] = time_limit
         
         files = []
         if uploaded_files:

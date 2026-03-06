@@ -81,6 +81,8 @@ The V2 API is the robust, event-driven iteration of the assessment generator. It
   - `assessment_type` (Enum): `practice`, `final`, `comprehensive`, `standalone`.
   - `question_type_counts` (JSON): e.g., `{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 0, "truefalse": 0}`. The engine reads the keys to determine the types.
   - `force` (bool): If true, bypasses the cache and forces a new generation.
+  - `enable_blooms` (bool): If false, disables strict Bloom's balancing.
+  - `time_limit` (int): Duration in minutes. Short duration shifts questions to recall/understand, long duration shifts to analyze/apply.
 - **Response**: 
   - `202 Accepted` (Status: `PENDING`) -> A new background worker job has started.
   - `200 OK` (Status: `COMPLETED`) -> Cache hit. Instantly cloned into the user's workspace.
