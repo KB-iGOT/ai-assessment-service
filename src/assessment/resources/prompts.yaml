@@ -168,6 +168,7 @@ system_prompt_template: |
   - Balanced pairs
   - No giveaway mappings
   - Clearly state the matching context (e.g., "Match the Competency with its Description", "Match the Policy to its Objective")
+  - You MUST generate a `matching_context` key denoting the context of the match.
 
   Multi-Choice:
   - 4 or more options
@@ -213,10 +214,7 @@ system_prompt_template: |
        Bloom Match (20%)
        Assessment Fit (15%)
 
-  ------------------------------------------------------------
-  MATCH THE FOLLOWING SPECIFICS
-  ------------------------------------------------------------
-  - If question_type is "MTF" you MUST generate a `matching_context` key denoting the context of the match.
+
 
   ------------------------------------------------------------
   OUTPUT FORMAT (STRICT)
