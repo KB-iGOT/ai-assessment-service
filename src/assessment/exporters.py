@@ -109,7 +109,11 @@ def generate_html_content(assessment_data: dict) -> str:
         html_parts.append(f"<h3>{q_type} ({len(q_list)})</h3>")
         
         for q in q_list:
-            default_q_txt = "Match the following items appropriately:" if q_type == "MTF Question" else "N/A"
+            if q_type == "MTF Question":
+                default_q_txt = q.get("matching_context", "Match the following items appropriately:")
+            else:
+                default_q_txt = "N/A"
+            
             q_txt = q.get("question_text", default_q_txt)
             q_html = f"""
             <div class="question-block">
@@ -143,14 +147,18 @@ def generate_html_content(assessment_data: dict) -> str:
 
             # Reasoning Box
             rs = q.get("reasoning", {})
+            ar = q.get("answer_rationale", {})
             kcm = rs.get("competency_alignment", {}).get("kcm", {})
             
             q_html += f"""
                 <div class="reasoning-box">
-                    <b>Rationale:</b> {rs.get('question_type_rationale')}<br/>
-                    <b>Bloom's Level:</b> {q.get('blooms_level')} ({rs.get('blooms_level_justification')})<br/>
-                    <b>Competency:</b> {kcm.get('competency_area')} - {kcm.get('competency_theme')}<br/>
-                    <b>Relevance:</b> {q.get('relevance_percentage')}%
+                    <b>Explanation:</b> {ar.get('correct_answer_explanation', 'N/A')}<br/>
+                    <b>Why Factor:</b> {ar.get('why_factor', 'N/A')}<br/>
+                    <b>Logic:</b> {ar.get('logic_justification', 'N/A')}<br/><br/>
+                    <b>Rationale:</b> {rs.get('question_type_rationale', 'N/A')}<br/>
+                    <b>Bloom's Level:</b> {q.get('blooms_level', 'N/A')} ({rs.get('blooms_level_justification', 'N/A')})<br/>
+                    <b>Competency:</b> {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}<br/>
+                    <b>Relevance:</b> {q.get('relevance_percentage', 'N/A')}%
                 </div>
             </div>
             """
@@ -204,7 +212,11 @@ def generate_docx(assessment_data: dict, output_path: Path):
         doc.add_heading(f"{q_type} ({len(q_list)})", level=2)
         
         for i, q in enumerate(q_list, 1):
-            default_q_txt = "Match the following items appropriately:" if q_type == "MTF Question" else "N/A"
+            if q_type == "MTF Question":
+                default_q_txt = q.get("matching_context", "Match the following items appropriately:")
+            else:
+                default_q_txt = "N/A"
+                
             doc.add_paragraph(f"Q{i}: {q.get('question_text', default_q_txt)}", style='List Number')
             
             if q_type == "Multiple Choice Question":
@@ -237,11 +249,15 @@ def generate_docx(assessment_data: dict, output_path: Path):
 
             # Reasoning
             reasoning = q.get("reasoning", {})
+            ar = q.get("answer_rationale", {})
             kcm = reasoning.get("competency_alignment", {}).get("kcm", {})
             
             r_para = doc.add_paragraph()
-            r_para.add_run(f"\nRationale: {reasoning.get('question_type_rationale')}\n").italic = True
-            r_para.add_run(f"Bloom's: {q.get('blooms_level')} | Relevance: {q.get('relevance_percentage')}%\n")
-            r_para.add_run(f"Competency: {kcm.get('competency_area')} - {kcm.get('competency_theme')}")
+            r_para.add_run(f"\nExplanation: {ar.get('correct_answer_explanation', 'N/A')}\n").italic = True
+            r_para.add_run(f"Why Factor: {ar.get('why_factor', 'N/A')}\n").italic = True
+            r_para.add_run(f"Logic: {ar.get('logic_justification', 'N/A')}\n\n").italic = True
+            r_para.add_run(f"Rationale: {reasoning.get('question_type_rationale', 'N/A')}\n").italic = True
+            r_para.add_run(f"Bloom's: {q.get('blooms_level', 'N/A')} ({reasoning.get('blooms_level_justification', 'N/A')}) | Relevance: {q.get('relevance_percentage', 'N/A')}%\n")
+            r_para.add_run(f"Competency: {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}")
             
     doc.save(str(output_path))

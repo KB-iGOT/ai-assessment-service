@@ -238,6 +238,18 @@ with tab_view:
                                     st.write(f"**Why Factor:** {rationale.get('why_factor', 'N/A')}")
                                     st.write(f"**Logic:** {rationale.get('logic_justification', 'N/A')}")
 
+                            # Display Reasoning
+                            reasoning = q.get("reasoning", {})
+                            if reasoning:
+                                with st.expander("Show Competency & Bloom's Reasoning"):
+                                    st.write(f"**Relevance:** {q.get('relevance_percentage', 'N/A')}%")
+                                    st.write(f"**Bloom's Level:** {q.get('blooms_level', 'N/A')} ({reasoning.get('blooms_level_justification', 'N/A')})")
+                                    st.write(f"**Rationale:** {reasoning.get('question_type_rationale', 'N/A')}")
+                                    kcm = reasoning.get("competency_alignment", {}).get("kcm", {})
+                                    st.write(f"**Competency:** {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}")
+                                    if kcm.get("competency_sub_theme"):
+                                        st.write(f"**Sub-Theme:** {kcm.get('competency_sub_theme', 'N/A')}")
+
                             # Reconstruct object
                             updated_q = q.copy()
                             if q_type != "MTF Question":

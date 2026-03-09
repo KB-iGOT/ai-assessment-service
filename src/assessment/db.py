@@ -2,7 +2,7 @@ import asyncpg
 import json
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from .config import DB_DSN
 
 logger = logging.getLogger(__name__)

@@ -12,10 +12,9 @@ from contextlib import asynccontextmanager
 
 from .db import init_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
 from .fetcher import fetch_course_data
-from .generator import generate_assessment
+from .config import INTERACTIVE_COURSES_PATH
 from .generator import generate_assessment
 from .exporters import generate_pdf, generate_docx
-from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
 from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
 from .events import send_completion_event, stop_kafka_producer, send_request_event
 from .exporters_csv_v2 import generate_csv_v2
