@@ -166,6 +166,7 @@ Contains three arrays: `Multiple Choice Question`, `FTB Question`, and `MTF Ques
 ## Core Governance Rules
 - Hallucination is strictly avoided by anchoring prompts to extracted transcripts and PDFs.
 - **KCM Mapping**: All competencies must be sourced from the authoritative KCM Dataset.
+- **Context Caching (Scale)**: The system automatically provisions a Gemini Context Cache for the 110 complete Behavioral and Functional KCM Competencies (including detailed descriptors and levels). This allows the LLM to process and map exact behavioral indicators against questions with near-zero latency overhead and dramatically reduced token costs per request.
 - All output text (objectives, questions, reasoning) is generated in the selected language.
 
 ## 🔄 Integration Workflow (Async Handling)

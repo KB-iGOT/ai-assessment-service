@@ -55,6 +55,37 @@ ASSESSMENT_PROMPTS = load_yaml('prompts.yaml')
 ASSESSMENT_SCHEMA_FILE = load_json('schemas.json')
 ASSESSMENT_SCHEMA = ASSESSMENT_SCHEMA_FILE.get('full_schema', {})
 KCM_DATASET = load_json('competencies.json')
+KCM_DESCRIPTIONS_FILE = load_json('kcm_descriptions.json')
+
+_active_kcm_cache = None
+
+async def get_or_create_kcm_cache() -> str:
+    global _active_kcm_cache
+    if _active_kcm_cache:
+        return _active_kcm_cache
+        
+    if not client or not KCM_DESCRIPTIONS_FILE:
+        return None
+        
+    try:
+        cache_content = [
+             types.Content(role="user", parts=[
+                 types.Part.from_text(text=f"SUPPLEMENTARY COMPETENCY REFERENCE DATASET:\n{json.dumps(KCM_DESCRIPTIONS_FILE, indent=2)}\n\nUse this detailed dataset as the authoritative reference for the behavioral indicators and level descriptions of all KCM competencies.")
+             ])
+        ]
+        
+        cached_context = await client.aio.caches.create(
+            model=GENAI_MODEL_NAME,
+            config=types.CreateCachedContentConfig(
+                contents=cache_content,
+            )
+        )
+        logger.info(f"Created new KCM Cache: {cached_context.name}")
+        _active_kcm_cache = cached_context.name
+        return _active_kcm_cache
+    except Exception as e:
+        logger.error(f"Failed to create KCM cache: {e}")
+        return None
 
 async def generate_assessment(
     question_type_counts: Dict[str, int],
@@ -315,24 +346,36 @@ def build_prompt(
 
 @retry(retry=retry_if_exception_type((Exception, APIError)), stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 async def call_llm(prompt: str) -> Tuple[str, Dict[str, Any]]:
+    global _active_kcm_cache
     if not client:
         raise RuntimeError("GenAI client is not initialized.")
         
     logger.info("Calling GenAI model: %s", GENAI_MODEL_NAME)
+    
+    cache_name = await get_or_create_kcm_cache()
     
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
         response_schema=ASSESSMENT_SCHEMA, # Use the correct Assessment Schema
         temperature=0.1,
     )
+    if cache_name:
+        config.cached_content = cache_name
 
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
-    response = await client.aio.models.generate_content(
-        model=GENAI_MODEL_NAME,
-        contents=contents,
-        config=config
-    )
+    try:
+        response = await client.aio.models.generate_content(
+            model=GENAI_MODEL_NAME,
+            contents=contents,
+            config=config
+        )
+    except Exception as e:
+        # Check if cache expired to trigger recreation on retry
+        if "Cached content not found" in str(e) or "404" in str(e) or "invalid" in str(e).lower() or "cache" in str(e).lower():
+            logger.warning("KCM Cache may have expired or is invalid. Resetting and triggering retry...")
+            _active_kcm_cache = None
+        raise e
     
     llm_usage = {}
     if response.usage_metadata:

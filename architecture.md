@@ -98,6 +98,12 @@ The prompt is dynamically constructed based on the `AssessmentType`:
 - **Standalone**: STRICT scope limitation to provided files only.
 - **Bloom's Taxonomy**: The prompt enforces a specific distribution (e.g., 20% Remember, 40% Analyze) to ensure pedagogical depth.
 
+### 3.3 Gemini Context Caching for KCM Competencies
+To improve latency and drastically reduce input token costs, the system uses the `google.genai` Context Caching API.
+- The 110 detailed Knowledge & Competency Model (KCM) definitions, Behavioral Indicators, and Levels (approx 60k tokens) are stored in `src/assessment/resources/kcm_descriptions.json`.
+- On startup or cache expiration, `generator.py` automatically uploads this static dataset to a Gemini Cache.
+- During `call_llm()`, the system connects the active Cache ID to the Prompt Generation request, giving the LLM deep competency context for negligible token overhead.
+
 ```mermaid
 flowchart LR
     Input[Inputs] --> B{Assessment Type?}

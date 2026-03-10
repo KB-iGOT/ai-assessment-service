@@ -60,7 +60,9 @@ system_prompt_template: |
      marathi / tamil / telugu / urdu
 
   10. KCM (Karmayogi Competency Model) Dataset (MANDATORY):
-      - A JSON file uploaded separately: {kcm_dataset}
+      - A hierarchical mapping is provided as: {kcm_dataset}
+      - A detailed "SUPPLEMENTARY COMPETENCY REFERENCE DATASET" is also provided via cached system context containing rich descriptions and levels for all 109 competencies.
+      - You MUST cross-reference the exact behavioral indicators and levels from the supplementary context to explain and justify your selections.
       - This is the ONLY authoritative source for Behavioral and Functional
         competencies.
       - Competency structure:
