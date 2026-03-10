@@ -148,6 +148,7 @@ def generate_html_content(assessment_data: dict) -> str:
             # Reasoning Box
             rs = q.get("reasoning", {})
             ar = q.get("answer_rationale", {})
+            kcm = rs.get("competency_alignment", {}).get("kcm", {})
             q_html += f"""
                 <div class="reasoning-box">
                     <b>Learning Objective:</b> {rs.get('learning_objective_alignment', 'N/A')}<br/>
