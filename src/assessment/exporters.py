@@ -148,10 +148,9 @@ def generate_html_content(assessment_data: dict) -> str:
             # Reasoning Box
             rs = q.get("reasoning", {})
             ar = q.get("answer_rationale", {})
-            kcm = rs.get("competency_alignment", {}).get("kcm", {})
-            
             q_html += f"""
                 <div class="reasoning-box">
+                    <b>Learning Objective:</b> {rs.get('learning_objective_alignment', 'N/A')}<br/>
                     <b>Explanation:</b> {ar.get('correct_answer_explanation', 'N/A')}<br/>
                     <b>Why Factor:</b> {ar.get('why_factor', 'N/A')}<br/>
                     <b>Logic:</b> {ar.get('logic_justification', 'N/A')}<br/><br/>
@@ -253,7 +252,8 @@ def generate_docx(assessment_data: dict, output_path: Path):
             kcm = reasoning.get("competency_alignment", {}).get("kcm", {})
             
             r_para = doc.add_paragraph()
-            r_para.add_run(f"\nExplanation: {ar.get('correct_answer_explanation', 'N/A')}\n").italic = True
+            r_para.add_run(f"\nLearning Objective: {reasoning.get('learning_objective_alignment', 'N/A')}\n").italic = True
+            r_para.add_run(f"Explanation: {ar.get('correct_answer_explanation', 'N/A')}\n").italic = True
             r_para.add_run(f"Why Factor: {ar.get('why_factor', 'N/A')}\n").italic = True
             r_para.add_run(f"Logic: {ar.get('logic_justification', 'N/A')}\n\n").italic = True
             r_para.add_run(f"Rationale: {reasoning.get('question_type_rationale', 'N/A')}\n").italic = True

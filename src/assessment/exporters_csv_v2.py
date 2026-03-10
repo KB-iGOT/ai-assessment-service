@@ -11,7 +11,7 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
     """
     
     # Define Header
-    headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging"]
+    headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging", "Learning Objective"]
     for i in range(1, 8):
         headers.extend([f"Option{i}", f"isOption{i}Correct"])
     headers.extend(["Explanation", "Why Factor", "Logic Justification"])
@@ -56,7 +56,8 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
             "QuestionNo": q_counter,
             "QuestionType": q_type,
             "Question": q.get("question_text", f"{default_q_txt}"),
-            "QuestionTagging": tagging
+            "QuestionTagging": tagging,
+            "Learning Objective": q.get("reasoning", {}).get("learning_objective_alignment", "")
         }
         
         # Override the MTF string to only contain the context since it lacks a QuestionText itself
