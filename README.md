@@ -144,22 +144,25 @@ Use this to display the "Audit" or "Design rationale" to the user.
 - Fields: `assessment_scope_summary`, `smart_learning_objectives` (Array of Strings), `unified_competency_map`, `time_appropriateness_validation`.
 
 #### **`questions`**
-Contains three arrays: `Multiple Choice Question`, `FTB Question`, and `MTF Question`.
+Contains arrays for each generated question type (e.g. `Multiple Choice Question`, `FTB Question`, `MTF Question`, `True/False Question`).
 - **Course Tagging**: Every question includes a `course_name` property designating the source course (visible as `QuestionTagging` in CSV exports, especially utilized in `comprehensive` assessments).
 - **Answer Rationale**: Every question has an `answer_rationale` object containing:
   - `correct_answer_explanation`
   - `why_factor`
   - `logic_justification`
 - **Reasoning**: Every question has a `reasoning` object containing:
-  - `learning_objective_alignment`: An exact string match to one of the Learning Objectives found in the course metadata's `instructions` array.
+  - `learning_objective_alignment`: **[NEW]** An exact string match to one of the Learning Objectives found in the course metadata. Frontends should display this in their reasoning/explanation UI blocks.
   - `competency_alignment`: Nested object with `kcm` (area, theme, sub_theme) and `domain`.
   - `blooms_level_justification`
   - `relevance_percentage`: 0-100 score.
 - **MTF Note**: `MTF Question` objects use `matching_context` instead of `question_text`.
 
-### 4. Direct Downloads
-- `http://api-url/ai-assment-generation/api/v1/download/{course_id}` (CSV)
-- `http://api-url/ai-assment-generation/api/v1/download_json/{course_id}` (JSON)
+### 4. Direct Downloads (V2)
+All V2 download links require you to either send the `x-auth-token` header or append `?token=<jwt>` to the URL for native browser downloading. 
+- `http://api-url/ai-assment-generation/api/v2/download_csv/{job_id}?token=<jwt>` (CSV)
+- `http://api-url/ai-assment-generation/api/v2/download_json/{job_id}?token=<jwt>` (JSON)
+- `http://api-url/ai-assment-generation/api/v2/download_pdf/{job_id}?token=<jwt>` (PDF)
+- `http://api-url/ai-assment-generation/api/v2/download_docx/{job_id}?token=<jwt>` (Word)
 
 ---
 
