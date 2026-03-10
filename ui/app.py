@@ -37,10 +37,10 @@ st.title("🧩 Assessment Generator V2")
 st.markdown("Test the full **Generate -> Clone -> Edit -> Event** lifecycle.")
 
 # --- Tab Layout ---
-tab_gen, tab_view, tab_history = st.tabs(["🚀 Generate / Clone", "📝 View & Edit Result", "🗂️ History"])
+tab_gen, tab_comp, tab_view, tab_history = st.tabs(["🚀 Generate / Clone", "📚 Comprehensive", "📝 View & Edit Result", "🗂️ History"])
 
 # ==========================================
-# TAB 1: GENERATE
+# TAB 1: GENERATE (Standard)
 # ==========================================
 with tab_gen:
     col_input, col_mode = st.columns([3, 1])
@@ -59,7 +59,7 @@ with tab_gen:
     with st.expander("Detailed Configuration", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "comprehensive", "standalone"])
+            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "standalone"])
         with col2:
             difficulty = st.selectbox("Difficulty", ["beginner", "intermediate", "advanced"], index=1)
         with col3:
@@ -79,10 +79,38 @@ with tab_gen:
         st.markdown("#### Advanced Settings")
         adv1, adv2 = st.columns(2)
         with adv1:
-            enable_blooms = st.checkbox("Enable Bloom's Taxonomy", value=True, help="If disabled, relies purely on Difficulty level")
-            course_weightage = st.text_input("Course Weightage JSON (Optional)", value="", help='e.g., {"do_course1": 60, "do_course2": 40}')
-        with adv2:
             time_limit = st.number_input("Time Limit (Minutes)", min_value=0, value=0, help="0 means no limit. Influences cognitive depth of questions.")
+            enable_blooms = st.checkbox("Enable Bloom's Taxonomy", value=True, help="If disabled, relies purely on Difficulty level")
+            
+            if enable_blooms:
+                st.markdown("**Bloom's Distribution (%)**")
+                b1, b2, b3 = st.columns(3)
+                b_rem = b1.number_input("Remember", 0, 100, 20)
+                b_und = b2.number_input("Understand", 0, 100, 30)
+                b_app = b3.number_input("Apply", 0, 100, 30)
+                
+                b4, b5, b6 = st.columns(3)
+                b_ana = b4.number_input("Analyze", 0, 100, 10)
+                b_eva = b5.number_input("Evaluate", 0, 100, 10)
+                b_cre = b6.number_input("Create", 0, 100, 0)
+                
+                blooms_total = b_rem + b_und + b_app + b_ana + b_eva + b_cre
+                if blooms_total != 100:
+                    st.warning(f"Total Bloom's percentage is {blooms_total}%. It should equal 100%.")
+                
+                blooms_config = {
+                    "Remember": b_rem,
+                    "Understand": b_und,
+                    "Apply": b_app,
+                    "Analyze": b_ana,
+                    "Evaluate": b_eva,
+                    "Create": b_cre
+                }
+            else:
+                blooms_config = None
+                
+        with adv2:
+            st.write("")
         
         uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
 
@@ -104,6 +132,9 @@ with tab_gen:
             'language': language,
             'enable_blooms': 'true' if enable_blooms else 'false'
         }
+        
+        if enable_blooms and blooms_config:
+            payload['blooms_config'] = json.dumps(blooms_config)
         
         if course_weightage.strip():
             payload['course_weightage'] = course_weightage.strip()
@@ -140,7 +171,141 @@ with tab_gen:
                 st.error(f"Connection Failed: {e}")
 
 # ==========================================
-# TAB 2: VIEW & EDIT
+# TAB 2: COMPREHENSIVE GENERATION
+# ==========================================
+with tab_comp:
+    st.markdown("### 📚 Comprehensive Assessment Builder")
+    st.info("Combine multiple courses with specific percentage weightages to generate a comprehensive cross-course assessment.")
+    
+    # Dynamic Course Inputs
+    if "comp_courses" not in st.session_state:
+        st.session_state.comp_courses = [{"id": "", "weight": 50}, {"id": "", "weight": 50}]
+        
+    st.markdown("#### Input Courses & Weights")
+    
+    course_data = []
+    total_weight = 0
+    for i, course in enumerate(st.session_state.comp_courses):
+        col1, col2, col3 = st.columns([5, 2, 1])
+        with col1:
+            c_id = st.text_input(f"Course ID {i+1}", value=course["id"], key=f"cid_{i}")
+        with col2:
+            c_w = st.number_input(f"Weight (%)", min_value=1, max_value=100, value=course["weight"], key=f"cw_{i}")
+        with col3:
+            st.write("") # Spacing
+            st.write("")
+            if st.button("🗑️", key=f"del_{i}"):
+                st.session_state.comp_courses.pop(i)
+                st.rerun()
+                
+        course_data.append({"id": c_id, "weight": c_w})
+        total_weight += c_w
+        
+    if st.button("➕ Add Another Course"):
+        st.session_state.comp_courses.append({"id": "", "weight": 0})
+        st.rerun()
+        
+    if total_weight != 100:
+        st.warning(f"⚠️ Total weight is currently {total_weight}%. It should ideally sum to 100%.")
+    else:
+        st.success("✅ Total weight is exactly 100%!")
+        
+    # Standard Configs
+    st.markdown("#### Configuration")
+    ccol1, ccol2, ccol3 = st.columns(3)
+    with ccol1:
+        comp_diff = st.selectbox("Difficulty Level", ["beginner", "intermediate", "advanced"], index=1)
+    with ccol2:
+        comp_lang = st.selectbox("Output Language", ["english", "hindi", "bengali", "gujarati", "kannada", "malayalam", "marathi", "tamil", "telugu", "odia", "punjabi", "assamese"])
+    with ccol3:
+        comp_enable_blooms = st.checkbox("Enable Bloom's", value=True, key="comp_blooms")
+        
+    comp_blooms_config = None
+    if comp_enable_blooms:
+        st.markdown("**Bloom's Distribution (%)**")
+        b1, b2, b3 = st.columns(3)
+        cb_rem = b1.number_input("Remember", 0, 100, 20, key="cb_rem")
+        cb_und = b2.number_input("Understand", 0, 100, 30, key="cb_und")
+        cb_app = b3.number_input("Apply", 0, 100, 30, key="cb_app")
+        
+        b4, b5, b6 = st.columns(3)
+        cb_ana = b4.number_input("Analyze", 0, 100, 10, key="cb_ana")
+        cb_eva = b5.number_input("Evaluate", 0, 100, 10, key="cb_eva")
+        cb_cre = b6.number_input("Create", 0, 100, 0, key="cb_cre")
+        
+        cb_total = cb_rem + cb_und + cb_app + cb_ana + cb_eva + cb_cre
+        if cb_total != 100:
+            st.warning(f"Total Bloom's percentage is {cb_total}%. It should equal 100%.")
+            
+        comp_blooms_config = {
+            "Remember": cb_rem,
+            "Understand": cb_und,
+            "Apply": cb_app,
+            "Analyze": cb_ana,
+            "Evaluate": cb_eva,
+            "Create": cb_cre
+        }
+        
+    st.markdown("#### Question Counts")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    cmcq = c1.number_input("MCQ", 0, 50, 10, key="cmcq")
+    cftb = c2.number_input("FTB", 0, 50, 0, key="cftb")
+    cmtf = c3.number_input("MTF", 0, 50, 0, key="cmtf")
+    cmulti = c4.number_input("Multi-Choice", 0, 50, 0, key="cmulti")
+    ctf  = c5.number_input("True/False", 0, 50, 0, key="ctf")
+    
+    total_q = cmcq + cftb + cmtf + cmulti + ctf
+    
+    if st.button("Generate Comprehensive", type="primary"):
+        if not auth_token:
+            st.error("Please enter an Auth Token in the sidebar first.")
+            st.stop()
+            
+        valid_courses = [c for c in course_data if c["id"].strip()]
+        if len(valid_courses) < 2:
+            st.error("A comprehensive assessment requires at least 2 valid courses.")
+            st.stop()
+            
+        c_ids = [c["id"].strip() for c in valid_courses]
+        c_weights = {c["id"].strip(): c["weight"] for c in valid_courses}
+        
+        comp_q_counts = {"mcq": cmcq, "ftb": cftb, "mtf": cmtf, "multichoice": cmulti, "truefalse": ctf}
+        comp_payload = {
+            'course_ids': ",".join(c_ids),
+            'force': 'true' if force_new else 'false', 
+            'assessment_type': 'comprehensive',
+            'difficulty': comp_diff,
+            'total_questions': total_q,
+            'question_type_counts': json.dumps(comp_q_counts),
+            'language': comp_lang,
+            'enable_blooms': 'true' if comp_enable_blooms else 'false',
+            'course_weightage': json.dumps(c_weights)
+        }
+        
+        if comp_enable_blooms and comp_blooms_config:
+            comp_payload['blooms_config'] = json.dumps(comp_blooms_config)
+        
+        with st.spinner("Calling V2 API (Comprehensive)..."):
+            try:
+                r = requests.post(f"{API_V2}/generate", data=comp_payload, headers=get_headers())
+                if r.status_code in [200, 202]:
+                    data = r.json()
+                    st.session_state['current_job_id'] = data.get("job_id")
+                    st.session_state['job_status'] = data.get("status")
+                    
+                    if r.status_code == 200:
+                        st.success(f"⚡ Instant Result! (Cache Hit/Cloned). Job ID: {data.get('job_id')}")
+                        st.balloons()
+                    else:
+                        st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
+                        st.info("Go to 'View & Edit Result' tab to poll status.")
+                else:
+                    st.error(f"API Error ({r.status_code}): {r.text}")
+            except Exception as e:
+                st.error(f"Connection Failed: {e}")
+
+# ==========================================
+# TAB 3: VIEW & EDIT
 # ==========================================
 with tab_view:
     job_id = st.text_input("Job ID", value=st.session_state.get('current_job_id', ''))

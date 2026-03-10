@@ -118,6 +118,7 @@ def generate_html_content(assessment_data: dict) -> str:
             q_html = f"""
             <div class="question-block">
                 <div class="question-text">Q{q_counter}: {q_txt}</div>
+                <div style="font-size: 0.85em; color: #666; margin-bottom: 8px;"><i>Source Course: {q.get('course_name', 'N/A')}</i></div>
             """
             
             # Options / Body
@@ -218,6 +219,10 @@ def generate_docx(assessment_data: dict, output_path: Path):
                 default_q_txt = "N/A"
                 
             doc.add_paragraph(f"Q{i}: {q.get('question_text', default_q_txt)}", style='List Number')
+            
+            # Course Tag
+            c_para = doc.add_paragraph()
+            c_para.add_run(f"Source Course: {q.get('course_name', 'N/A')}").italic = True
             
             if q_type == "Multiple Choice Question":
                 for opt in q.get("options", []):
