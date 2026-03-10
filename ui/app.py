@@ -243,6 +243,7 @@ with tab_view:
                             if reasoning:
                                 with st.expander("Show Competency & Bloom's Reasoning"):
                                     st.write(f"**Relevance:** {q.get('relevance_percentage', 'N/A')}%")
+                                    st.write(f"**Learning Objective:** {reasoning.get('learning_objective_alignment', 'N/A')}")
                                     st.write(f"**Bloom's Level:** {q.get('blooms_level', 'N/A')} ({reasoning.get('blooms_level_justification', 'N/A')})")
                                     st.write(f"**Rationale:** {reasoning.get('question_type_rationale', 'N/A')}")
                                     kcm = reasoning.get("competency_alignment", {}).get("kcm", {})
