@@ -75,15 +75,20 @@ The V2 API is the robust, event-driven iteration of the assessment generator. It
 
 ### 1. Generate Assessment (Async)
 - **Endpoint**: `POST /generate` (Multipart/Form-Data)
-- **Description**: Starts an event-driven generation job or instantly clones an existing one.
-- **Key Parameters**:
-  - `course_ids` (List[str]): IDs of courses to process.
+- **Description**: Starts an event-driven generation job or instantly clones an existing one. Requires multipart form-data so that files or text fields can be uploaded.
+- **Key Parameters (Form Data)**:
+  - `course_ids` (String): Comma-separated list of IDs of courses to process (e.g. `do_1,do_2`).
   - `assessment_type` (Enum): `practice`, `final`, `comprehensive`, `standalone`.
-  - `question_type_counts` (JSON): e.g., `{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 0, "truefalse": 0}`. The engine reads the keys to determine the types.
-  - `force` (bool): If true, bypasses the cache and forces a new generation.
-  - `enable_blooms` (bool): If false, disables strict Bloom's balancing.
-  - `course_weightage` (JSON str, optional): For comprehensive assessments, define percentage weights per course (e.g. `{"course1": 60, "course2": 40}`).
-  - `time_limit` (int): Duration in minutes. Short duration shifts questions to recall/understand, long duration shifts to analyze/apply.
+  - `difficulty` (Enum): `beginner`, `intermediate`, `advanced`.
+  - `language` (Enum): `english`, `hindi`, `tamil`, `telugu`, etc.
+  - `total_questions` (Integer): The total number of questions to generate.
+  - `question_type_counts` (JSON String): A JSON dict specifying exact counts per type. E.g., `{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 0, "truefalse": 0}`.
+  - `force` (Boolean String): `"true"` or `"false"`. If `"true"`, bypasses the cache and forces a new LLM generation (costs tokens).
+  - `enable_blooms` (Boolean String): `"true"` or `"false"`. Toggles whether Bloom's Taxonomy cognitive levels should be enforced.
+  - `blooms_config` (JSON String, Optional): If `enable_blooms` is true, this dictates the exact percentage distribution. Keys must map exactly to: `{"Remember": 20, "Understand": 20, "Apply": 20, "Analyze": 20, "Evaluate": 10, "Create": 10}`. Must sum to 100%.
+  - `course_weightage` (JSON String, Optional): ONLY for `comprehensive` assessments, define percentage weights per course ID. E.g., `{"do_course1": 60, "do_course2": 40}`. Must sum to 100%.
+  - `time_limit` (Integer, Optional): Duration in minutes. Short duration shifts questions to recall/understand, long duration shifts to analyze/apply.
+  - `files` (File Upload, Optional): PDF or VTT files for context injection.
 - **Response**: 
   - `202 Accepted` (Status: `PENDING`) -> A new background worker job has started.
   - `200 OK` (Status: `COMPLETED`) -> Cache hit. Instantly cloned into the user's workspace.
@@ -257,3 +262,93 @@ Base URL: `http://localhost:8000/ai-assment-generation`
 - **Endpoint (PDF)**: `GET /api/v1/download_pdf/{job_id}`
 - **Endpoint (DOCX)**: `GET /api/v1/download_docx/{job_id}`
 - **Description**: Download the assessment as a file. Only available when status is `COMPLETED`.
+
+---
+
+## 💻 Developer Integration Examples
+
+To help frontend UI developers rapidly integrate the V2 APIs, here are ready-to-use cURL commands and a sample of the JSON structure that will be returned upon completion.
+
+### Example 1: Standard Assessment (Course specific)
+A standard request targeting a single course (e.g., `do_1144540583527301121908`), with 10 total questions and custom Bloom's distribution.
+```bash
+curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \\
+--header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \\
+--form 'course_ids="do_1144540583527301121908"' \\
+--form 'assessment_type="practice"' \\
+--form 'difficulty="intermediate"' \\
+--form 'language="english"' \\
+--form 'total_questions="10"' \\
+--form 'question_type_counts="{\\"mcq\\": 5, \\"ftb\\": 5, \\"mtf\\": 0, \\"multichoice\\": 0, \\"truefalse\\": 0}"' \\
+--form 'enable_blooms="true"' \\
+--form 'blooms_config="{\\"Remember\\": 20, \\"Understand\\": 30, \\"Apply\\": 30, \\"Analyze\\": 20, \\"Evaluate\\": 0, \\"Create\\": 0}"' \\
+--form 'force="false"'
+```
+
+### Example 2: Comprehensive Assessment (Cross-Course)
+A complex request merging two courses together. Notice how `course_ids` contains both, and the `course_weightage` JSON dictates that 70% of the questions should come from Course A, and 30% from Course B.
+```bash
+curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \\
+--header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \\
+--form 'course_ids="do_courseA123,do_courseB456"' \\
+--form 'assessment_type="comprehensive"' \\
+--form 'difficulty="advanced"' \\
+--form 'language="english"' \\
+--form 'total_questions="20"' \\
+--form 'question_type_counts="{\\"mcq\\": 10, \\"ftb\\": 5, \\"mtf\\": 5, \\"multichoice\\": 0, \\"truefalse\\": 0}"' \\
+--form 'enable_blooms="false"' \\
+--form 'course_weightage="{\\"do_courseA123\\": 70, \\"do_courseB456\\": 30}"' \\
+--form 'force="false"'
+```
+
+### 📄 Expected JSON Output (Snippet)
+Once you poll `/api/v2/status/{job_id}` and it hits `COMPLETED`, the `assessment_data` field will contain this structure. You map these fields directly to your frontend UI. Note the `course_name` field indicating where the question was sourced, and the unique `learning_objective_alignment`.
+
+```json
+{
+  "blueprint": {
+    "assessment_scope_summary": "Comprehensive assessment covering...",
+    "smart_learning_objectives": [
+      "Identify the core mandate and organizational structure of the Department.",
+      "Describe the primary functions..."
+    ],
+    "unified_competency_map": {},
+    "time_appropriateness_validation": "Validated for 30 minutes."
+  },
+  "questions": {
+    "Multiple Choice Question": [
+      {
+        "course_name": "Introduction to Financial Services",
+        "question_text": "What is the core mandate of the Department?",
+        "options": [
+          { "text": "Marketing" },
+          { "text": "Financial Regulation" },
+          { "text": "Human Resources" },
+          { "text": "IT Support" }
+        ],
+        "correct_option_index": 2,
+        "answer_rationale": {
+          "correct_answer_explanation": "The department strictly oversees regulations...",
+          "why_factor": "Essential for compliance.",
+          "logic_justification": "Drawn directly from chapter 2."
+        },
+        "reasoning": {
+          "learning_objective_alignment": "Identify the core mandate and organizational structure of the Department.",
+          "competency_alignment": {
+            "kcm": {
+              "competency_area": "Functional",
+              "competency_theme": "Financial Acumen",
+              "sub_theme": "Regulatory Compliance"
+            },
+            "domain": "Finance"
+          },
+          "blooms_level_justification": "Requires recalling foundational mandates.",
+          "question_type_rationale": "MCQ is best to select a single mandate among distractors."
+        },
+        "blooms_level": "Remember",
+        "relevance_percentage": 95
+      }
+    ]
+  }
+}
+```
