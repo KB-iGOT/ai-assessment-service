@@ -105,6 +105,11 @@ The V2 API is the robust, event-driven iteration of the assessment generator. It
 
 ### 4. Fetch User History
 - **Endpoint**: `GET /history`
+- **Description**: Returns a list of all assessment jobs (pending, in-progress, completed, failed) that were generated or cloned by the authenticated user.
+- **Response**: Array of objects containing `job_id`, `status`, `created_at`, `config`, and `error_message`.
+
+### 4. Fetch User History
+- **Endpoint**: `GET /history`
 - **Description**: Returns a clean listing of all previous assessments initiated by the authenticated user.
 - **Response**: Array of objects containing `job_id`, `status`, `created_at`, `updated_at`, and `config` metadata.
 
@@ -146,7 +151,7 @@ The `assessment_data` field contains a JSON string (or object) with two main bra
 
 #### **`blueprint`**
 Use this to display the "Audit" or "Design rationale" to the user.
-- Fields: `assessment_scope_summary`, `smart_learning_objectives` (Array of Strings), `unified_competency_map`, `time_appropriateness_validation`.
+- Fields: `assessment_scope_summary`, `courses_covered`, `module_structure`, `smart_learning_objectives` (Array of Strings), `unified_competency_map`, `blooms_taxonomy_mapping`, `difficulty_distribution`, `time_appropriateness_validation`.
 
 #### **`questions`**
 Contains arrays for each generated question type (e.g. `Multiple Choice Question`, `FTB Question`, `MTF Question`, `True/False Question`).
@@ -301,8 +306,82 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \\
 --form 'force="false"'
 ```
 
-### 📄 Expected JSON Output (Snippet)
-Once you poll `/api/v2/status/{job_id}` and it hits `COMPLETED`, the `assessment_data` field will contain this structure. You map these fields directly to your frontend UI. Note the `course_name` field indicating where the question was sourced, and the unique `learning_objective_alignment`.
+### Example 3: Standalone Assessment (File Upload)
+A request that does not rely on course IDs, but instead uploads physical PDF/VTT files for the LLM context.
+```bash
+curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \\
+--header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \\
+--form 'assessment_type="standalone"' \\
+--form 'difficulty="beginner"' \\
+--form 'language="english"' \\
+--form 'total_questions="5"' \\
+--form 'question_type_counts="{\\"mcq\\": 5, \\"ftb\\": 0, \\"mtf\\": 0, \\"multichoice\\": 0, \\"truefalse\\": 0}"' \\
+--form 'enable_blooms="false"' \\
+--form 'files=@"/path/to/your/document.pdf"' \\
+--form 'files=@"/path/to/your/transcript.vtt"'
+```
+
+### Example 4: Polling the Job Status (In-Progress)
+Once you receive the `job_id` from the `POST /generate` endpoint, you must poll the `/status` endpoint roughly every 5 seconds until it completes.
+```bash
+curl --location 'http://localhost:8000/ai-assment-generation/api/v2/status/comprehensive_do_courseA123_do_courseB456' \\
+--header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
+```
+
+**Response (Still running):**
+```json
+{
+  "status": "IN_PROGRESS",
+  "job_id": "comprehensive_do_courseA123_do_courseB456"
+}
+```
+
+**Response (If it crashed/failed):**
+```json
+{
+  "status": "FAILED",
+  "job_id": "comprehensive_do_courseA123_do_courseB456",
+  "error": "Failed to extract text from PDF document."
+}
+```
+
+### Example 5: Fetching User Generation History
+Retrieve a list of all assessments ever generated (or currently generating) by the authenticated user.
+```bash
+curl --location 'http://localhost:8000/ai-assment-generation/api/v2/history' \\
+--header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
+```
+
+**Expected JSON Output (Snippet):**
+```json
+[
+  {
+    "job_id": "comprehensive_do_courseA123_do_courseB456",
+    "status": "COMPLETED",
+    "created_at": "2026-03-10T11:45:00.000Z",
+    "updated_at": "2026-03-10T11:46:15.000Z",
+    "config": {
+      "assessment_type": "comprehensive",
+      "difficulty": "advanced",
+      "total_questions": 20
+    },
+    "error_message": null
+  },
+  {
+    "job_id": "standalone_5f03a...",
+    "status": "FAILED",
+    "created_at": "2026-03-10T10:00:00.000Z",
+    "updated_at": "2026-03-10T10:00:30.000Z",
+    "config": {},
+    "error_message": "LLM Timeout during generation."
+  }
+]
+```
+
+### 📄 Expected JSON Output (For `COMPLETED` Generation Jobs)
+Once the polling status for a `POST /generate` or `GET /status/{job_id}` hits `COMPLETED`, the response will also include an `assessment_data` field. You map these fields directly to your frontend UI.
+
+**Note on Course Weightages**: The requested `course_weightage` percentages are passed to the LLM during generation, which determines how many questions it generates from each selected course. In the final output, you can identify exactly which course each question came from by reading the `course_name` property on every question object.
 
 ```json
 {
