@@ -141,7 +141,7 @@ The `assessment_data` field contains a JSON string (or object) with two main bra
 
 #### **`blueprint`**
 Use this to display the "Audit" or "Design rationale" to the user.
-- Fields: `assessment_scope_summary`, `smart_learning_objectives`, `unified_competency_map`, `time_appropriateness_validation`.
+- Fields: `assessment_scope_summary`, `smart_learning_objectives` (Array of Strings), `unified_competency_map`, `time_appropriateness_validation`.
 
 #### **`questions`**
 Contains three arrays: `Multiple Choice Question`, `FTB Question`, and `MTF Question`.
@@ -151,7 +151,7 @@ Contains three arrays: `Multiple Choice Question`, `FTB Question`, and `MTF Ques
   - `why_factor`
   - `logic_justification`
 - **Reasoning**: Every question has a `reasoning` object containing:
-  - `learning_objective_alignment`
+  - `learning_objective_alignment`: An exact string match to one of the Learning Objectives found in the course metadata's `instructions` array.
   - `competency_alignment`: Nested object with `kcm` (area, theme, sub_theme) and `domain`.
   - `blooms_level_justification`
   - `relevance_percentage`: 0-100 score.
@@ -165,6 +165,7 @@ Contains three arrays: `Multiple Choice Question`, `FTB Question`, and `MTF Ques
 
 ## Core Governance Rules
 - Hallucination is strictly avoided by anchoring prompts to extracted transcripts and PDFs.
+- **Learning Objective Tagging**: The LLM parses HTML `instructions` from the Karmayogi API into discrete Learning Objectives, and is strictly prompted to tag every single question with the exact verbatim string of the objective it answers.
 - **KCM Mapping**: All competencies must be sourced from the authoritative KCM Dataset.
 - **Context Caching (Scale)**: The system automatically provisions a Gemini Context Cache for the 110 complete Behavioral and Functional KCM Competencies (including detailed descriptors and levels). This allows the LLM to process and map exact behavioral indicators against questions with near-zero latency overhead and dramatically reduced token costs per request.
 - All output text (objectives, questions, reasoning) is generated in the selected language.

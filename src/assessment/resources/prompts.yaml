@@ -20,13 +20,16 @@ system_prompt_template: |
      - Topics to Prioritize: {topic_names}
      - Target Language: {input_language}
 
-  3. KCM Competency Architecture:
+  3. Learning Objectives:
+     {learning_objectives_str}
+
+  4. KCM Competency Architecture:
      {kcm_dataset}
 
-  4. Content Context:
+  5. Content Context:
      {content_context}
      
-  5. Additional Instructions (SME notes):
+  6. Additional Instructions (SME notes):
      {additional_instructions}
 
   6. Bloom’s Taxonomy Distribution (Strict):
@@ -45,7 +48,7 @@ system_prompt_template: |
      Total Questions = {total_questions_x3}
      Question counts are NON-NEGOTIABLE.
 
-  9. Time to Complete Assessment (OPTIONAL):
+  10. Time to Complete Assessment (OPTIONAL):
      {time_to_complete}
      - If provided, validate time appropriateness against question volume and difficulty mix.
      - Influence question thinking depth based on duration:
@@ -53,13 +56,13 @@ system_prompt_template: |
        - Lower duration -> Focus on straight factual recall / understanding.
      - Do NOT change question count based on time.
 
-  9. Language Selection (MANDATORY):
+  11. Language Selection (MANDATORY):
      {input_language}
      Supported values:
      hindi / english / bengali / gujarati / kannada / malayalam /
      marathi / tamil / telugu / urdu
 
-  10. KCM (Karmayogi Competency Model) Dataset (MANDATORY):
+  12. KCM (Karmayogi Competency Model) Dataset (MANDATORY):
       - A hierarchical mapping is provided as: {kcm_dataset}
       - A detailed "SUPPLEMENTARY COMPETENCY REFERENCE DATASET" is also provided via cached system context containing rich descriptions and levels for all 109 competencies.
       - You MUST cross-reference the exact behavioral indicators and levels from the supplementary context to explain and justify your selections.
@@ -68,7 +71,7 @@ system_prompt_template: |
       - Competency structure:
         competency_area → competency_theme → competency_sub_theme
         
-  11. Course Weightage Distribution:
+  13. Course Weightage Distribution:
       {course_weightage_instruction}
 
   ------------------------------------------------------------
@@ -196,7 +199,7 @@ system_prompt_template: |
      - "MCQ" / "FTB" / "MTF" / "MULTICHOICE" / "TRUEFALSE"
 
   2. reasoning:
-     - learning_objective_alignment
+     - learning_objective_alignment: You MUST copy EXACTLY ONE learning objective verbatim from the provided course's `instructions` list. Do NOT summarize or invent new text.
      - competency_alignment:
          - kcm:
              - competency_area

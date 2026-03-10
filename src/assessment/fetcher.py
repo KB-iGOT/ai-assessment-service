@@ -197,10 +197,37 @@ async def download_file(client: httpx.AsyncClient, url: str, path: Path):
     resp.raise_for_status()
     path.write_bytes(resp.content)
 
-def strip_html(html: str) -> str:
-    clean = re.compile('<.*?>')
-    text = re.sub(clean, '', html)
-    return text.replace('&nbsp;', ' ').strip()
+def strip_html(html_str: str) -> List[str]:
+    """
+    Cleans HTML and extracts list items if present, or just clean text lines.
+    Returns a list of clean strings (Learning Objectives).
+    """
+    if not html_str:
+        return []
+        
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_str, "html.parser")
+        
+        list_items = soup.find_all('li')
+        if list_items:
+            objectives = [item.get_text(separator=' ', strip=True) for item in list_items]
+            return [obj for obj in objectives if obj]
+        else:
+            text = soup.get_text(separator='\n', strip=True)
+            return [line.strip() for line in text.split('\n') if line.strip()]
+            
+    except ImportError:
+        import html
+        text = html.unescape(html_str)
+        li_matches = re.findall(r'<li>(.*?)</li>', text, re.IGNORECASE | re.DOTALL)
+        if li_matches:
+            cleaned = [re.sub(r'<[^>]+>', '', li).strip() for li in li_matches]
+            return [c for c in cleaned if c]
+            
+        clean_text = re.sub(r'<[^>]+>', ' ', text)
+        lines = [line.strip() for line in clean_text.split('\n') if line.strip()]
+        return lines
 
 def sanitize_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', '_', name).strip()

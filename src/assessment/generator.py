@@ -136,6 +136,9 @@ async def generate_assessment(
     combined_transcript = []
     combined_pdfs = []
     
+    # Aggregate Learning Objectives specifically
+    combined_learning_objectives = []
+    
     # Deduplication Set (to prevent double-handling of leaf vs root downloads)
     seen_content_hashes = set()
 
@@ -151,6 +154,14 @@ async def generate_assessment(
             if meta_path.exists():
                 meta = json.loads(meta_path.read_text(encoding='utf-8'))
                 aggregated_metadata["courses"].append(meta)
+                
+                # Extract Learning Objectives from the newly formatted instructions array
+                instructions = meta.get("instructions", [])
+                if isinstance(instructions, list):
+                    combined_learning_objectives.extend(instructions)
+                elif isinstance(instructions, str) and instructions.strip():
+                     # Fallback just in case some legacy string instructions slipped through
+                     combined_learning_objectives.append(instructions)
                 
             # Transcript (Recursive - find all english_subtitles.vtt in subfolders)
             for vtt_path in c_path.rglob("english_subtitles.vtt"):
@@ -209,6 +220,14 @@ async def generate_assessment(
     final_transcript_str = "\n\n".join(combined_transcript) if combined_transcript else "N/A"
     final_pdf_str = "\n\n".join(combined_pdfs) if combined_pdfs else "N/A"
     
+    # Format Learning Objectives into a nice readable list for the prompt
+    if not combined_learning_objectives:
+        final_lo_str = "None explicitly provided. Synthesize appropriate Learning Objectives based on the course content."
+    else:
+        # Deduplicate LOs just in case multiple modules had the exact same strings
+        unique_los = list(dict.fromkeys(combined_learning_objectives))
+        final_lo_str = "\n".join([f"- {lo}" for lo in unique_los])
+    
     # 2. Format Bloom's Distribution
     if not enable_blooms:
         blooms_str = "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
@@ -243,6 +262,7 @@ async def generate_assessment(
     prompt = build_prompt(
         question_type_counts=question_type_counts,
         course_context=json.dumps(aggregated_metadata, indent=2),
+        learning_objectives_str=final_lo_str,
         transcript=final_transcript_str,
         pdf_snippets=final_pdf_str,
         assessment_type=assessment_type,
@@ -269,6 +289,7 @@ async def generate_assessment(
 def build_prompt(
     question_type_counts:Dict[str, int],
     course_context: str, 
+    learning_objectives_str: str,
     transcript: str, 
     pdf_snippets: str,
     assessment_type: str,
@@ -285,6 +306,7 @@ def build_prompt(
     
     # Placeholder Replacement
     prompt = prompt_template.replace("{course_context}", course_context)
+    prompt = prompt.replace("{learning_objectives_str}", learning_objectives_str)
     prompt = prompt.replace("{content_context}", f"TRANSCRIPTS:\n{transcript}\n\nPDF CONTENT:\n{pdf_snippets}")
     prompt = prompt.replace("{additional_instructions}", additional_instructions or "None provided")
     prompt = prompt.replace("{input_language}", input_language or "English")
