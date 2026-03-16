@@ -34,7 +34,7 @@ services:
       - KAFKA_TOPIC=assessment.lifecycle.events
       - DISABLE_AUTH_VERIFICATION=${DISABLE_AUTH_VERIFICATION:-false}
       - KAFKA_REQUEST_TOPIC=assessment.request
-	    - LOG_LEVEL=INFO
+	  - LOG_LEVEL=INFO
       - MAX_CONCURRENCY=50
       - WORKER_BATCH_SIZE=50
       - MAX_ATTEMPTS=3
