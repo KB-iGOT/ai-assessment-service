@@ -24,16 +24,16 @@ services:
       - kafka
     environment:
       - PYTHONPATH=/app/src
-      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
+#      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
       - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
       - GOOGLE_LOCATION=${GOOGLE_LOCATION}
       - GENAI_MODEL_NAME=${GENAI_MODEL_NAME}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
       - KARMAYOGI_API_KEY=${KARMAYOGI_API_KEY}
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - KAFKA_TOPIC=assessment.lifecycle.events
+#      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+#      - KAFKA_TOPIC=assessment.lifecycle.events
       - DISABLE_AUTH_VERIFICATION=${DISABLE_AUTH_VERIFICATION:-false}
-      - KAFKA_REQUEST_TOPIC=assessment.request
+#      - KAFKA_REQUEST_TOPIC=assessment.request
 	  - LOG_LEVEL=INFO
       - MAX_CONCURRENCY=50
       - WORKER_BATCH_SIZE=50
@@ -46,7 +46,7 @@ services:
       - CLEANUP_RETENTION_DAYS=7
       - CLEANUP_SCHEDULE_HOUR=3
       - CLEANUP_SCHEDULE_MINUTE=0
-    command: python -m assessment.worker_service
+    command: uvicorn assessment.api:app --host 0.0.0.0 --port 8000
 
   worker:
     build: .
@@ -58,15 +58,15 @@ services:
       - kafka
     environment:
       - PYTHONPATH=/app/src
-      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
+#      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
       - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
       - GOOGLE_LOCATION=${GOOGLE_LOCATION}
       - GENAI_MODEL_NAME=${GENAI_MODEL_NAME}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
       - KARMAYOGI_API_KEY=${KARMAYOGI_API_KEY}
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - KAFKA_TOPIC=assessment.lifecycle.events
-      - KAFKA_REQUEST_TOPIC=assessment.request
+#      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+#      - KAFKA_TOPIC=assessment.lifecycle.events
+#      - KAFKA_REQUEST_TOPIC=assessment.request
       - DISABLE_AUTH_VERIFICATION=${DISABLE_AUTH_VERIFICATION:-false}
       - LOG_LEVEL=INFO
       - MAX_CONCURRENCY=50
