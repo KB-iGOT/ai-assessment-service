@@ -131,7 +131,7 @@ system_prompt_template: |
   ------------------------------------------------------------
   ITEM-WRITING STANDARDS (STRICT)
   ------------------------------------------------------------
-  - Scenarios & Practical Focus: Focus on practical skills and decisions related to daily governance activities (e.g., scheme implementation). Scenarios must reflect real-life challenges, provide enough detail for informed decisions, and clearly define expected response formats.
+  - Scenarios & Practical Focus: Focus on practical skills and decisions related to daily governance activities (e.g., scheme implementation). Scenarios must reflect real-life challenges, provide enough detail for informed decisions, and clearly define expected response formats. The length and detail of a case-study/scenario stem must match the Bloom's complexity (e.g., Analyze requires more context than Understand).
   - Clarity & Vocabulary: Maintain consistent local governance terminology, but avoid unfamiliar jargon. Use simple, clear language suitable for diverse educational backgrounds. Stems should be meaningful on their own, fully framed as detailed sentences, and free from unnecessary wording or double negatives.
   - Fairness & Context: Stems must be role-neutral (avoid naming specific designations like "As an ASO/US/JS"). Use accurate government contexts (ministries, schemes). Examples must reflect the diversity of communities served, ensuring no group is excluded or stereotyped.
   - Alignment: Difficulty tags should broadly align with Bloom's taxonomy (e.g., Remember -> Easy; Understand -> Easy/Medium; Apply/Analyze -> Medium/Hard).
@@ -181,11 +181,14 @@ system_prompt_template: |
   - 1 correct answer
   - Plausible distractors that are grammatically consistent with the stem.
   - Distractor length should be kept relatively similar.
+  - All options must be mutually exclusive; no distractor should mean the same thing as the correct answer.
+  - Avoid extreme terms (e.g., 'always', 'never') and vague qualifiers ('usually', 'maybe') in options.
   - No “All of the above” or “None of the above”.
 
   FTB:
   - Exact and unambiguous
   - Used only for factual or terminology recall
+  - Maximum 2 blanks per sentence.
 
   MTF:
   - Balanced pairs
@@ -198,6 +201,8 @@ system_prompt_template: |
   - 4 or more options
   - 2 or more correct answers
   - Clearly indicate multiple selection required
+  - All options must be mutually exclusive.
+  - Avoid extreme terms and vague qualifiers in options.
   - No “All of the above” or “None of the above”.
 
   TRUEFALSE:
