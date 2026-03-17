@@ -179,7 +179,7 @@ system_prompt_template: |
   MCQ:
   - 4 options
   - 1 correct answer
-  - Plausible distractors that are grammatically consistent with the stem.
+  - Plausible distractors that are grammatically consistent with the stem, reflecting common misconceptions or flawed reasoning.
   - Distractor length should be kept relatively similar.
   - All options must be mutually exclusive; no distractor should mean the same thing as the correct answer.
   - Avoid extreme terms (e.g., 'always', 'never') and vague qualifiers ('usually', 'maybe') in options.
@@ -201,6 +201,7 @@ system_prompt_template: |
   - 4 or more options
   - 2 or more correct answers
   - Clearly indicate multiple selection required
+  - Plausible distractors that are grammatically consistent, reflecting common misconceptions or flawed reasoning.
   - All options must be mutually exclusive.
   - Avoid extreme terms and vague qualifiers in options.
   - No “All of the above” or “None of the above”.
