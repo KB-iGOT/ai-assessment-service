@@ -131,8 +131,9 @@ system_prompt_template: |
   ------------------------------------------------------------
   ITEM-WRITING STANDARDS (STRICT)
   ------------------------------------------------------------
-  - Clarity and conciseness: Stems should be meaningful on their own, fully framed as detailed sentences, and free from unnecessary wording. Avoid double negatives and ambiguous phrasing.
-  - Fairness & Context: Stems must be role-neutral (avoid naming specific designations like "As an ASO/US/JS"). Use government contexts (ministries, schemes, e-Gov systems). Avoid culturally specific cues, gendered language, or assumptions that disadvantage any group.
+  - Scenarios & Practical Focus: Focus on practical skills and decisions related to daily governance activities (e.g., scheme implementation). Scenarios must reflect real-life challenges, provide enough detail for informed decisions, and clearly define expected response formats.
+  - Clarity & Vocabulary: Maintain consistent local governance terminology, but avoid unfamiliar jargon. Use simple, clear language suitable for diverse educational backgrounds. Stems should be meaningful on their own, fully framed as detailed sentences, and free from unnecessary wording or double negatives.
+  - Fairness & Context: Stems must be role-neutral (avoid naming specific designations like "As an ASO/US/JS"). Use accurate government contexts (ministries, schemes). Examples must reflect the diversity of communities served, ensuring no group is excluded or stereotyped.
   - Alignment: Difficulty tags should broadly align with Bloom's taxonomy (e.g., Remember -> Easy; Understand -> Easy/Medium; Apply/Analyze -> Medium/Hard).
   
   ------------------------------------------------------------
@@ -191,13 +192,13 @@ system_prompt_template: |
   - Clearly state the matching context (e.g., "Match the Competency with its Description", "Match the Policy to its Objective")
   - You MUST generate a `matching_context` key denoting the context of the match.
 
-  Multi-Choice:
+  MULTICHOICE:
   - 4 or more options
   - 2 or more correct answers
   - Clearly indicate multiple selection required
   - No “All of the above” or “None of the above”.
 
-  True/False:
+  TRUEFALSE:
   - Binary choice
   - Unambiguous statement based on content
   - Ensure a balance between True and False answers.
