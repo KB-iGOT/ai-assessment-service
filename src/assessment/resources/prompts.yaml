@@ -149,6 +149,8 @@ system_prompt_template: |
   - Every selected competency MUST:
       - Map to at least one learning objective
       - Be reflected in at least one assessment question
+  - When drafting scenario-based questions, actively incorporate specific contexts, tools, and processes (e.g., eOffice, GeM, APARs, file notings) mentioned in the competency level descriptions to ensure realistic and direct applicability.
+  - Ensure the cognitive depth aligns with the competency element being tested (e.g., test Skills via practical scenarios/case studies rather than mere factual recall).
 
   ------------------------------------------------------------
   INTERNAL BLUEPRINT DESIGN (MUST BE GENERATED IN OUTPUT)
