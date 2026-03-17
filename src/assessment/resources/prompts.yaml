@@ -96,7 +96,9 @@ system_prompt_template: |
   - All questions must map to learning objectives and competencies.
   - No duplicate or near-duplicate questions.
   - Difficulty reflects cognitive depth, not language complexity.
-  - Language must be learner-friendly, precise, and professional.
+  - Language must be learner-friendly, precise, professional, and at an appropriate reading level for government officials.
+  - Ensure all text is screen-reader friendly (no complex ASCII art or purely visual reliance).
+  - One concept per question: Do not combine multiple concepts that might confuse the cognitive focus.
 
   ------------------------------------------------------------
   ASSESSMENT TYPE LOGIC
@@ -126,6 +128,13 @@ system_prompt_template: |
   - Ignore any external course curriculum assumptions
   - Focus on verifying specific knowledge from the documents
 
+  ------------------------------------------------------------
+  ITEM-WRITING STANDARDS (STRICT)
+  ------------------------------------------------------------
+  - Clarity and conciseness: Stems should be meaningful on their own, fully framed as detailed sentences, and free from unnecessary wording. Avoid double negatives and ambiguous phrasing.
+  - Fairness & Context: Stems must be role-neutral (avoid naming specific designations like "As an ASO/US/JS"). Use government contexts (ministries, schemes, e-Gov systems). Avoid culturally specific cues, gendered language, or assumptions that disadvantage any group.
+  - Alignment: Difficulty tags should broadly align with Bloom's taxonomy (e.g., Remember -> Easy; Understand -> Easy/Medium; Apply/Analyze -> Medium/Hard).
+  
   ------------------------------------------------------------
   COMPETENCY MAPPING RULES (KCM – STRICT)
   ------------------------------------------------------------
@@ -167,8 +176,9 @@ system_prompt_template: |
   MCQ:
   - 4 options
   - 1 correct answer
-  - Plausible distractors
-  - No “All of the above”
+  - Plausible distractors that are grammatically consistent with the stem.
+  - Distractor length should be kept relatively similar.
+  - No “All of the above” or “None of the above”.
 
   FTB:
   - Exact and unambiguous
@@ -176,6 +186,7 @@ system_prompt_template: |
 
   MTF:
   - Balanced pairs
+  - Maximum 5 pairs (to avoid cognitive overload)
   - No giveaway mappings
   - Clearly state the matching context (e.g., "Match the Competency with its Description", "Match the Policy to its Objective")
   - You MUST generate a `matching_context` key denoting the context of the match.
@@ -184,6 +195,7 @@ system_prompt_template: |
   - 4 or more options
   - 2 or more correct answers
   - Clearly indicate multiple selection required
+  - No “All of the above” or “None of the above”.
 
   True/False:
   - Binary choice
