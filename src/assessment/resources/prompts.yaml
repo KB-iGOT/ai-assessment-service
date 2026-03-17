@@ -32,17 +32,17 @@ system_prompt_template: |
   6. Additional Instructions (SME notes):
      {additional_instructions}
 
-  6. Bloom’s Taxonomy Distribution (Strict):
+  7. Bloom’s Taxonomy Distribution (Strict):
      {blooms_distribution}
      - If marked as Disabled, ignore Bloom's balancing entirely.
 
-  7. Difficulty Level:
+  8. Difficulty Level:
      {difficulty_level}
      - beginner
      - intermediate
      - advanced
 
-  8. Question Count:
+  9. Question Count:
      Generate EXACTLY the following types (Strict Schema Enforcement):
      {question_type_instructions}
      Total Questions = {total_questions_x3}
@@ -208,7 +208,7 @@ system_prompt_template: |
          - domain (if applicable)
      - blooms_level_justification
      - difficulty_justification
-     - question_type_rationale
+     - question_type_rationale: Explain why this specific content and concept is best evaluated using this particular question type. Do NOT provide generic statements like "MTF is an effective format". The rationale must be specific to why the question's content fits the format.
      - assessment_type_relevance
 
   3. answer_rationale:
