@@ -350,7 +350,6 @@ with tab_view:
             
             # Parse Data
             raw_res = data.get("assessment_data", {})
-            if isinstance(raw_res, str): raw_res = json.loads(raw_res)
             
             # We need to preserve the structure to save it back
             # Flatten for editing? 

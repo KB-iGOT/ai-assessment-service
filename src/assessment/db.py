@@ -21,8 +21,19 @@ CREATE TABLE IF NOT EXISTS interactive_assessments (
 );
 """
 
-async def init_db():
+async def get_conn() -> asyncpg.Connection:
     conn = await asyncpg.connect(DB_DSN)
+    for type_name in ['json', 'jsonb']:
+        await conn.set_type_codec(
+            type_name,
+            encoder=json.dumps,
+            decoder=json.loads,
+            schema='pg_catalog'
+        )
+    return conn
+
+async def init_db():
+    conn: asyncpg.Connection = await get_conn()
     try:
         await conn.execute(CREATE_TABLE_SQL)
         
@@ -37,7 +48,7 @@ async def init_db():
         await conn.close()
 
 async def get_assessment_status(course_id: str) -> Optional[Dict[str, Any]]:
-    conn = await asyncpg.connect(DB_DSN)
+    conn: asyncpg.Connection = await get_conn()
     try:
         row = await conn.fetchrow("SELECT * FROM interactive_assessments WHERE course_id = $1", course_id)
         if row:
@@ -47,7 +58,7 @@ async def get_assessment_status(course_id: str) -> Optional[Dict[str, Any]]:
         await conn.close()
 
 async def create_job(course_id: str, user_id: Optional[str] = None):
-    conn = await asyncpg.connect(DB_DSN)
+    conn: asyncpg.Connection = await get_conn()
     try:
         await conn.execute("""
             INSERT INTO interactive_assessments (course_id, user_id, status, updated_at)
@@ -58,8 +69,8 @@ async def create_job(course_id: str, user_id: Optional[str] = None):
     finally:
         await conn.close()
 
-async def update_job_status(course_id: str, status: str, error: str = None):
-    conn = await asyncpg.connect(DB_DSN)
+async def update_job_status(course_id: str, status: str, error: str | None = None):
+    conn: asyncpg.Connection = await get_conn()
     try:
         await conn.execute("""
             UPDATE interactive_assessments
@@ -70,7 +81,7 @@ async def update_job_status(course_id: str, status: str, error: str = None):
         await conn.close()
 
 async def save_assessment_result(course_id: str, metadata: dict, assessment: dict, usage: dict):
-    conn = await asyncpg.connect(DB_DSN)
+    conn: asyncpg.Connection = await get_conn()
     try:
         await conn.execute("""
             UPDATE interactive_assessments
@@ -80,7 +91,7 @@ async def save_assessment_result(course_id: str, metadata: dict, assessment: dic
                 token_usage = $4, 
                 updated_at = NOW()
             WHERE course_id = $1
-        """, course_id, json.dumps(metadata), json.dumps(assessment), json.dumps(usage))
+        """, course_id, metadata, assessment, usage)
     finally:
         await conn.close()
 
@@ -89,7 +100,7 @@ async def find_job_by_prefix(prefix: str) -> Optional[Dict[str, Any]]:
     Finds a completed job that matches the prefix (Base Hash).
     Used to find a template to clone from.
     """
-    conn = await asyncpg.connect(DB_DSN)
+    conn: asyncpg.Connection = await get_conn()
     try:
         # Optimization: Prefer jobs that haven't been edited if we track that?
         # For now, just grab the most recently updated successful one
@@ -108,14 +119,14 @@ async def create_completed_job(course_id: str, user_id: str, metadata: dict, ass
     """
     Creates a new job record directly in COMPLETED state (Cloning).
     """
-    conn = await asyncpg.connect(DB_DSN)
+    conn: asyncpg.Connection = await get_conn()
     try:
         await conn.execute("""
             INSERT INTO interactive_assessments 
             (course_id, user_id, status, metadata, assessment_data, token_usage, updated_at)
             VALUES ($1, $2, 'COMPLETED', $3, $4, $5, NOW())
             ON CONFLICT (course_id) DO NOTHING
-        """, course_id, user_id, json.dumps(metadata), json.dumps(assessment), json.dumps(usage))
+        """, course_id, user_id, metadata, assessment, usage)
     finally:
         await conn.close()
 
@@ -124,25 +135,26 @@ async def update_job_result(job_id: str, user_id: str, new_assessment_data: dict
     Updates the assessment result (Edit Mode).
     Enforces ownership (user_id must match).
     """
-    conn = await asyncpg.connect(DB_DSN)
+    conn: asyncpg.Connection = await get_conn()
     try:
         result = await conn.execute("""
             UPDATE interactive_assessments
             SET assessment_data = $3, updated_at = NOW()
             WHERE course_id = $1 AND user_id = $2
-        """, job_id, user_id, json.dumps(new_assessment_data))
+        """, job_id, user_id, new_assessment_data)
         
         # Check if rows were updated (if 0, implies job not found or unauthorized)
         # "UPDATE 1" -> 'UPDATE' in tag, '1' in rows
-        return result != "UPDATE 0"
+        success = result != "UPDATE 0"
     finally:
         await conn.close()
+    return success
 
 async def get_user_assessments_history(user_id: str) -> List[Dict[str, Any]]:
     """
     Fetches the assessment history for a specific user.
     """
-    conn = await asyncpg.connect(DB_DSN)
+    conn: asyncpg.Connection = await get_conn()
     try:
         rows = await conn.fetch("""
             SELECT course_id as job_id, status, created_at, updated_at, metadata, error_message
@@ -150,6 +162,7 @@ async def get_user_assessments_history(user_id: str) -> List[Dict[str, Any]]:
             WHERE user_id = $1
             ORDER BY updated_at DESC
         """, user_id)
-        return [dict(row) for row in rows]
+        data = [dict(row) for row in rows]
     finally:
         await conn.close()
+    return data

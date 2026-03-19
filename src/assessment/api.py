@@ -169,10 +169,10 @@ async def generate(
     # Validate Question Types
     valid_types = {t.value for t in QuestionType}
 
-    question_type_counts: Dict[str, int] = json.loads(question_type_counts)
-    q_types = list(question_type_counts.keys())
+    q_counts: Dict[str, int] = json.loads(question_type_counts)
+    q_types = list(q_counts.keys())
     
-    for qtype, count in question_type_counts.items():
+    for qtype, count in q_counts.items():
         if qtype not in valid_types:
             raise HTTPException(400, f"Unknown question type: {qtype}")
         if count <= 0:
@@ -195,7 +195,7 @@ async def generate(
         str(assessment_type),
         str(difficulty),
         str(total_questions),
-        str(question_type_counts),
+        str(q_counts),
         str(sorted(q_types)), # Sort for consistency
         str(time_limit),
         str(topic_names),
@@ -273,7 +273,7 @@ async def download_csv(job_id: str):
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     
     # Flatten logic for new structure
     rows = []
@@ -309,7 +309,7 @@ async def download_json(job_id: str):
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     
     json_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment.json"
     with open(json_path, 'w', encoding='utf-8') as f:
@@ -323,7 +323,7 @@ async def download_pdf(job_id: str):
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     pdf_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment.pdf"
     
     # Remove caching check to ensure font fixes are applied
@@ -338,7 +338,7 @@ async def download_docx(job_id: str):
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     docx_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment.docx"
     
     if not docx_path.exists():
@@ -461,7 +461,7 @@ async def generate_v2(
     if existing_own and not force:
          status = existing_own['status']
          if status == 'COMPLETED':
-             result = json.loads(existing_own['assessment_data']) if isinstance(existing_own['assessment_data'], str) else existing_own['assessment_data']
+             result = existing_own['assessment_data']
              return {
                 "message": "Assessment retrieved from cache", 
                 "status": "COMPLETED", 
@@ -478,9 +478,9 @@ async def generate_v2(
             # CLONE IT!
             logger.info(f"Cloning template {template['course_id']} for user {user_id}")
             
-            t_meta = json.loads(template['metadata']) if isinstance(template['metadata'], str) else template['metadata']
-            t_data = json.loads(template['assessment_data']) if isinstance(template['assessment_data'], str) else template['assessment_data']
-            t_usage = json.loads(template['token_usage']) if isinstance(template['token_usage'], str) else template['token_usage']
+            t_meta = template['metadata']
+            t_data = template['assessment_data']
+            t_usage = template['token_usage']
             
             await create_completed_job(user_job_id, user_id, t_meta, t_data, t_usage)
             
@@ -582,7 +582,7 @@ async def download_csv_v2(job_id: str, user_id: str = Depends(get_current_user))
     # Check Ownership? For downloads, maybe strictness is good.
     # if data.get('user_id') != user_id: raise HTTPException(403)
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     csv_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.csv"
     
     # Always generate fresh to ensure logic update
@@ -596,7 +596,7 @@ async def download_json_v2(job_id: str, user_id: str = Depends(get_current_user)
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     json_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.json"
     
     with open(json_path, 'w', encoding='utf-8') as f:
@@ -610,7 +610,7 @@ async def download_pdf_v2(job_id: str, user_id: str = Depends(get_current_user))
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     pdf_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.pdf"
     
     generate_pdf(assessment_json, pdf_path)
@@ -622,7 +622,7 @@ async def download_docx_v2(job_id: str, user_id: str = Depends(get_current_user)
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
     
-    assessment_json = json.loads(data['assessment_data']) if isinstance(data['assessment_data'], str) else data['assessment_data']
+    assessment_json = data['assessment_data']
     docx_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.docx"
     
     generate_docx(assessment_json, docx_path)
@@ -638,11 +638,8 @@ async def get_history(user_id: str = Depends(get_current_user)):
     # Clean up metadata string output
     formatted_history = []
     for item in history:
-        try:
-            meta = json.loads(item.get("metadata", "{}")) if item.get("metadata") else {}
-        except Exception:
-            meta = {}
-            
+        meta = item.get("metadata") or {}
+        
         formatted_history.append({
             "job_id": item.get("job_id"),
             "status": item.get("status"),
