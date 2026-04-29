@@ -41,9 +41,16 @@ postgres_data/
 .DS_Store
 Thumbs.db
 
-# Credentials
+# Credentials & Keys
 credentials.json
 *.json.key
+keys/
+
+# Logs directory
+logs/
+
+# Docker Compose binary (use docker-compose from PATH instead)
+docker-compose
 
 #HTML
 pdf_video_meta.html
