@@ -1,0 +1,714 @@
+{
+  "full_schema": {
+    "type": "object",
+    "properties": {
+      "blueprint": {
+        "type": "object",
+        "properties": {
+          "assessment_scope_summary": {
+            "type": "string"
+          },
+          "courses_covered": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unified_competency_map": {
+            "type": "object",
+            "properties": {
+              "functional": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "behavioral": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "domain": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "module_structure": {
+            "type": "string"
+          },
+          "smart_learning_objectives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blooms_taxonomy_mapping": {
+            "type": "object"
+          },
+          "difficulty_distribution": {
+            "type": "string"
+          },
+          "question_type_suitability": {
+            "type": "string"
+          },
+          "evaluation_passing_policy": {
+            "type": "string"
+          },
+          "time_appropriateness_validation": {
+            "type": "string"
+          },
+          "prompt_version": {
+            "type": "string"
+          },
+          "api_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "assessment_scope_summary",
+          "courses_covered",
+          "unified_competency_map",
+          "smart_learning_objectives",
+          "time_appropriateness_validation",
+          "prompt_version",
+          "api_version"
+        ]
+      },
+      "questions": {
+        "type": "object",
+        "properties": {
+          "Multiple Choice Question": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "question_type": {
+                  "type": "string",
+                  "const": "MCQ"
+                },
+                "question_text": {
+                  "type": "string"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "index"
+                    ]
+                  }
+                },
+                "correct_option_index": {
+                  "type": "integer"
+                },
+                "difficulty_level": {
+                  "type": "string"
+                },
+                "blooms_level": {
+                  "type": "string"
+                },
+                "reasoning": {
+                  "type": "object",
+                  "properties": {
+                    "learning_objective_alignment": {
+                      "type": "string"
+                    },
+                    "competency_alignment": {
+                      "type": "object",
+                      "properties": {
+                        "kcm": {
+                          "type": "object",
+                          "properties": {
+                            "competency_area": {
+                              "type": "string"
+                            },
+                            "competency_theme": {
+                              "type": "string"
+                            },
+                            "competency_sub_theme": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
+                        },
+                        "domain": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
+                    },
+                    "blooms_level_justification": {
+                      "type": "string"
+                    },
+                    "difficulty_justification": {
+                      "type": "string"
+                    },
+                    "question_type_rationale": {
+                      "type": "string"
+                    },
+                    "assessment_type_relevance": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "relevance_percentage": {
+                  "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
+                },
+                "answer_rationale": {
+                  "type": "object",
+                  "properties": {
+                    "correct_answer_explanation": {
+                      "type": "string"
+                    },
+                    "why_factor": {
+                      "type": "string"
+                    },
+                    "logic_justification": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "question_type",
+                "question_text",
+                "options",
+                "correct_option_index",
+                "reasoning",
+                "relevance_percentage",
+                "answer_rationale"
+              ]
+            }
+          },
+          "FTB Question": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "question_type": {
+                  "type": "string",
+                  "const": "FTB"
+                },
+                "question_text": {
+                  "type": "string"
+                },
+                "correct_answer": {
+                  "type": "string"
+                },
+                "difficulty_level": {
+                  "type": "string"
+                },
+                "blooms_level": {
+                  "type": "string"
+                },
+                "reasoning": {
+                  "type": "object",
+                  "properties": {
+                    "learning_objective_alignment": {
+                      "type": "string"
+                    },
+                    "competency_alignment": {
+                      "type": "object",
+                      "properties": {
+                        "kcm": {
+                          "type": "object",
+                          "properties": {
+                            "competency_area": {
+                              "type": "string"
+                            },
+                            "competency_theme": {
+                              "type": "string"
+                            },
+                            "competency_sub_theme": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
+                        },
+                        "domain": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
+                    },
+                    "blooms_level_justification": {
+                      "type": "string"
+                    },
+                    "difficulty_justification": {
+                      "type": "string"
+                    },
+                    "question_type_rationale": {
+                      "type": "string"
+                    },
+                    "assessment_type_relevance": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "relevance_percentage": {
+                  "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
+                },
+                "answer_rationale": {
+                  "type": "object",
+                  "properties": {
+                    "correct_answer_explanation": {
+                      "type": "string"
+                    },
+                    "why_factor": {
+                      "type": "string"
+                    },
+                    "logic_justification": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "question_type",
+                "question_text",
+                "correct_answer",
+                "reasoning",
+                "relevance_percentage",
+                "answer_rationale"
+              ]
+            }
+          },
+          "MTF Question": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "question_type": {
+                  "type": "string",
+                  "const": "MTF"
+                },
+                "pairs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "string"
+                      },
+                      "right": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "right"
+                    ]
+                  }
+                },
+                "difficulty_level": {
+                  "type": "string"
+                },
+                "blooms_level": {
+                  "type": "string"
+                },
+                "reasoning": {
+                  "type": "object",
+                  "properties": {
+                    "learning_objective_alignment": {
+                      "type": "string"
+                    },
+                    "competency_alignment": {
+                      "type": "object",
+                      "properties": {
+                        "kcm": {
+                          "type": "object",
+                          "properties": {
+                            "competency_area": {
+                              "type": "string"
+                            },
+                            "competency_theme": {
+                              "type": "string"
+                            },
+                            "competency_sub_theme": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
+                        },
+                        "domain": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
+                    },
+                    "blooms_level_justification": {
+                      "type": "string"
+                    },
+                    "difficulty_justification": {
+                      "type": "string"
+                    },
+                    "question_type_rationale": {
+                      "type": "string"
+                    },
+                    "assessment_type_relevance": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "relevance_percentage": {
+                  "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
+                },
+                "answer_rationale": {
+                  "type": "object",
+                  "properties": {
+                    "correct_answer_explanation": {
+                      "type": "string"
+                    },
+                    "why_factor": {
+                      "type": "string"
+                    },
+                    "logic_justification": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
+                },
+                "matching_context": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "question_id",
+                "question_type",
+                "pairs",
+                "reasoning",
+                "relevance_percentage",
+                "answer_rationale",
+                "matching_context"
+              ]
+            }
+          },
+          "Multi-Choice Question": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "question_type": {
+                  "type": "string",
+                  "const": "MULTICHOICE"
+                },
+                "question_text": {
+                  "type": "string"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "index"
+                    ]
+                  }
+                },
+                "correct_option_index": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  }
+                },
+                "difficulty_level": {
+                  "type": "string"
+                },
+                "blooms_level": {
+                  "type": "string"
+                },
+                "reasoning": {
+                  "type": "object",
+                  "properties": {
+                    "learning_objective_alignment": {
+                      "type": "string"
+                    },
+                    "competency_alignment": {
+                      "type": "object",
+                      "properties": {
+                        "kcm": {
+                          "type": "object",
+                          "properties": {
+                            "competency_area": {
+                              "type": "string"
+                            },
+                            "competency_theme": {
+                              "type": "string"
+                            },
+                            "competency_sub_theme": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
+                        },
+                        "domain": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
+                    },
+                    "blooms_level_justification": {
+                      "type": "string"
+                    },
+                    "difficulty_justification": {
+                      "type": "string"
+                    },
+                    "question_type_rationale": {
+                      "type": "string"
+                    },
+                    "assessment_type_relevance": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "relevance_percentage": {
+                  "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
+                },
+                "answer_rationale": {
+                  "type": "object",
+                  "properties": {
+                    "correct_answer_explanation": {
+                      "type": "string"
+                    },
+                    "why_factor": {
+                      "type": "string"
+                    },
+                    "logic_justification": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "question_type",
+                "question_text",
+                "options",
+                "correct_option_index",
+                "reasoning",
+                "relevance_percentage",
+                "answer_rationale"
+              ]
+            }
+          },
+          "True/False Question": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "question_id": {
+                  "type": "string"
+                },
+                "question_type": {
+                  "type": "string",
+                  "const": "TRUEFALSE"
+                },
+                "question_text": {
+                  "type": "string"
+                },
+                "correct_answer": {
+                  "type": "string",
+                  "enum": [
+                    "True",
+                    "False"
+                  ]
+                },
+                "difficulty_level": {
+                  "type": "string"
+                },
+                "blooms_level": {
+                  "type": "string"
+                },
+                "reasoning": {
+                  "type": "object",
+                  "properties": {
+                    "learning_objective_alignment": {
+                      "type": "string"
+                    },
+                    "competency_alignment": {
+                      "type": "object",
+                      "properties": {
+                        "kcm": {
+                          "type": "object",
+                          "properties": {
+                            "competency_area": {
+                              "type": "string"
+                            },
+                            "competency_theme": {
+                              "type": "string"
+                            },
+                            "competency_sub_theme": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
+                        },
+                        "domain": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
+                    },
+                    "blooms_level_justification": {
+                      "type": "string"
+                    },
+                    "difficulty_justification": {
+                      "type": "string"
+                    },
+                    "question_type_rationale": {
+                      "type": "string"
+                    },
+                    "assessment_type_relevance": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "relevance_percentage": {
+                  "type": "integer"
+                },
+                "course_name": {
+                  "type": "string"
+                },
+                "answer_rationale": {
+                  "type": "object",
+                  "properties": {
+                    "correct_answer_explanation": {
+                      "type": "string"
+                    },
+                    "why_factor": {
+                      "type": "string"
+                    },
+                    "logic_justification": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
+                }
+              },
+              "required": [
+                "question_id",
+                "question_type",
+                "question_text",
+                "correct_answer",
+                "reasoning",
+                "relevance_percentage",
+                "answer_rationale"
+              ]
+            }
+          }
+        },
+        "required": [
+          "Multiple Choice Question",
+          "FTB Question",
+          "MTF Question",
+          "Multi-Choice Question",
+          "True/False Question"
+        ]
+      }
+    },
+    "required": [
+      "blueprint",
+      "questions"
+    ]
+  }
+}
