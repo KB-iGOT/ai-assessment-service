@@ -55,8 +55,8 @@ app = FastAPI(
     description="Audit-ready event-driven assessment generation using Gemini 2.5 Pro and Kafka",
     version="2.0.0",
     lifespan=lifespan,
-    root_path="/ai-assment-generation",
-    servers=[{"url": "/ai-assment-generation", "description": "Default Server"}],
+    root_path="/ai-assessment-generation",
+    servers=[{"url": "/ai-assessment-generation", "description": "Default Server"}],
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
@@ -68,7 +68,7 @@ api_v1_router = APIRouter(prefix="/api/v1", tags=["API V1"])
 @app.get("/", include_in_schema=False)
 async def root():
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/ai-assment-generation/docs")
+    return RedirectResponse(url="/ai-assessment-generation/docs")
 
 @app.get("/health")
 async def health():
@@ -125,15 +125,15 @@ async def generate(
     difficulty: Difficulty = Form(...),
     total_questions: int = Form(5),
     question_type_counts: str = Form(
-        '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}', 
-        description='Default values: {"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}'
+        '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}',
+        description='JSON: mcq, ftb, mtf, multichoice, truefalse counts. Example: mcq=5, ftb=5, mtf=5, multichoice=5, truefalse=5'
     ),
     time_limit: Optional[int] = Form(None, description="Time limit in minutes"),
     topic_names: Optional[str] = Form("", description="Comma-separated topics"),
     language: Language = Form(Language.ENGLISH),
     blooms_config: Optional[str] = Form(
         '{"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Evaluate": 10, "Create": 0}',
-        description="JSON string of Bloom's %"
+        description="JSON string of Bloom's percentage per level"
     ),
     enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
     course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
@@ -364,15 +364,15 @@ async def generate_v2(
     difficulty: Difficulty = Form(...),
     total_questions: int = Form(5),
     question_type_counts: str = Form(
-        '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}', 
-        description='Default values: {"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}'
+        '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}',
+        description='JSON: mcq, ftb, mtf, multichoice, truefalse counts. Example: mcq=5, ftb=5, mtf=5, multichoice=5, truefalse=5'
     ),
     time_limit: Optional[int] = Form(None),
     topic_names: Optional[str] = Form(""),
     language: Language = Form(Language.ENGLISH),
     blooms_config: Optional[str] = Form(
         '{"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Analyze": 10, "Evaluate": 10, "Create": 0}',
-        description="JSON string of Bloom's %"
+        description="JSON string of Bloom's percentage per level"
     ),
     enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
     course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
@@ -382,7 +382,7 @@ async def generate_v2(
     """
     V2 Generation Endpoint:
     1. Authenticated: Requires valid `x-auth-token` (User ID extraction).
-    2. Private Instances: Every request gets a unique Job ID: `{Hash}_{UserID}`.
+    2. Private Instances: Every request gets a unique Job ID (Hash + UserID).
     3. Clone-on-Request: If a matching assessment exists (even from another user), it is instantly CLONED to this user's workspace.
     4. Async/Sync Hybrid: 
        - Returns 200 OK + JSON if cache hit/cloned.

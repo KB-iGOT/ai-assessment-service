@@ -163,7 +163,7 @@ Copy `.env.example` to `.env` and configure:
 
 The V2 API is the production-ready, event-driven iteration. It introduces **Authentication**, **Private Workspaces**, and instant **Cloning**.
 
-- **Base URL**: `http://localhost:8000/ai-assment-generation/api/v2`
+- **Base URL**: `http://localhost:8000/ai-assessment-generation/api/v2`
 - **Authentication**: All V2 endpoints require a valid JWT.
   - **Header (preferred)**: `x-auth-token: <jwt>`
   - **Query param (browser downloads)**: `?token=<jwt>`
@@ -308,7 +308,7 @@ Every question object includes:
 ### Example 1: Standard Assessment (Single Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
 --header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_1144540583527301121908"' \
 --form 'assessment_type="practice"' \
@@ -324,7 +324,7 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
 ### Example 2: Comprehensive Assessment (Cross-Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
 --header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_courseA123,do_courseB456"' \
 --form 'assessment_type="comprehensive"' \
@@ -340,7 +340,7 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
 ### Example 3: Standalone Assessment (File Upload)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
 --header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
 --form 'assessment_type="standalone"' \
 --form 'difficulty="beginner"' \
@@ -355,14 +355,14 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
 ### Example 4: Poll Job Status
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/status/comprehensive_do_courseA123_do_courseB456' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/status/comprehensive_do_courseA123_do_courseB456' \
 --header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
 ```
 
 ### Example 5: Fetch User History
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/history' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/history' \
 --header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
 ```
 
@@ -384,16 +384,16 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/history' \
 
 ```bash
 # CSV (7-option V2 schema)
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_csv/{job_id}?token=YOUR_JWT'
+curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_csv/{job_id}?token=YOUR_JWT'
 
 # JSON
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_json/{job_id}?token=YOUR_JWT'
+curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_json/{job_id}?token=YOUR_JWT'
 
 # PDF
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_pdf/{job_id}?token=YOUR_JWT'
+curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_pdf/{job_id}?token=YOUR_JWT'
 
 # Word (DOCX)
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_docx/{job_id}?token=YOUR_JWT'
+curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_docx/{job_id}?token=YOUR_JWT'
 ```
 
 ---
