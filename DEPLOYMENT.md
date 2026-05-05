@@ -31,7 +31,7 @@ docker-compose up -d --build
 
 ## 4. Verification
 - **Swagger Documentation**: `http://<server-ip>:8000/docs` (Base redirect still works)
-- **API v1 Status**: `http://<server-ip>:8000/ai-assment-generation/v1/status/{course_id}`
+- **API v1 Status**: `http://<server-ip>:8000/ai-assessment-generation/v1/status/{course_id}`
 - **Streamlit UI**: `http://<server-ip>:8501`
 - **Health Check**: `http://<server-ip>:8000/health`
 

@@ -4,12 +4,12 @@ import jwt
 from typing import Optional, Dict, Any
 from fastapi import Request, HTTPException, Security
 from fastapi.security import APIKeyHeader
-from functools import lru_cache
+from .config import JWKS_URL, SSO_URL, SSO_REALM, REQUIRED_ROLE
 
 logger = logging.getLogger(__name__)
 
 # Security Scheme for Swagger UI (API Key Header)
-api_key_header = APIKeyHeader(name="x-auth-token", auto_error=False)
+api_key_header = APIKeyHeader(name="x-authenticated-user-token", auto_error=False)
 
 class KeyManager:
     """
@@ -19,7 +19,7 @@ class KeyManager:
     """
     def __init__(self):
         self._keys: Dict[str, Any] = {}
-        self.jwks_url = "https://portal.igotkarmayogi.gov.in/auth/realms/sunbird/protocol/openid-connect/certs"
+        self.jwks_url = JWKS_URL
 
     def get_public_key(self, key_id: str) -> Optional[Any]:
         # 1. Check Cache
@@ -57,6 +57,14 @@ class KeyManager:
             logger.error(f"Error fetching JWKS: {e}")
             raise e
 
+def check_iss(iss: str) -> bool:
+    realm_url = SSO_URL + "realms/" + SSO_REALM
+    return realm_url.lower() == iss.lower()
+
+def check_role(payload: Dict[str, Any]) -> bool:
+    roles = payload.get("user_roles", [])
+    return REQUIRED_ROLE in roles
+
 # Singleton Instance
 key_manager = KeyManager()
 
@@ -65,7 +73,7 @@ def get_key_manager() -> KeyManager:
 
 async def validate_token(token: str) -> Dict[str, Any]:
     """
-    Validates the 'x-auth-token' (JWT).
+    Validates the 'x-authenticated-user-token' (JWT).
     Logic mirrors the provided Java exemplar:
     1. Decode Header to get 'kid'.
     2. Fetch Public Key.
@@ -92,11 +100,21 @@ async def validate_token(token: str) -> Dict[str, Any]:
             token,
             public_key,
             algorithms=["RS256"],
-            options={"require": ["exp", "sub"]} # Enforce expiry and subject
+            options={"require": ["exp", "sub"]}
         )
-        
+
+        if not check_iss(payload.get("iss", "")):
+            logger.warning(f"Token issuer mismatch: {payload.get('iss')}")
+            raise HTTPException(status_code=401, detail="Token issuer invalid")
+
+        if not check_role(payload):
+            logger.warning(f"Token missing required role: {REQUIRED_ROLE}")
+            raise HTTPException(status_code=403, detail=f"Forbidden: role '{REQUIRED_ROLE}' required")
+
         return payload
 
+    except HTTPException:
+        raise
     except jwt.ExpiredSignatureError:
         logger.warning("Auth token expired")
         raise HTTPException(status_code=401, detail="Expired auth token")

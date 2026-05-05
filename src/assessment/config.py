@@ -14,8 +14,20 @@ else:
 
 # API Configuration
 KARMAYOGI_API_KEY = os.getenv("KARMAYOGI_API_KEY", "")
-SEARCH_API_URL = "https://igotkarmayogi.gov.in/api/content/v1/search"
-TRANSCODER_STATS_URL = "https://learning-ai.prod.karmayogibharat.net/api/kb-pipeline/v3/transcoder/stats"
+KARMAYOGI_BASE_URL = os.getenv("KARMAYOGI_BASE_URL", "https://igotkarmayogi.gov.in")
+LEARNING_AI_BASE_URL = os.getenv("LEARNING_AI_BASE_URL", "https://learning-ai.prod.karmayogibharat.net")
+
+# Derived API endpoints
+SEARCH_API_URL = f"{KARMAYOGI_BASE_URL}/api/content/v1/search"
+TRANSCODER_STATS_URL = f"{LEARNING_AI_BASE_URL}/api/kb-pipeline/v3/transcoder/stats"
+
+# SSO / Auth Configuration
+SSO_URL = os.getenv("SUNBIRD_SSO_URL")
+SSO_REALM = os.getenv("SUNBIRD_SSO_REALM")
+REQUIRED_ROLE = os.getenv("REQUIRED_ROLE", "AI_ASSESSMENT_CREATOR")
+
+# Derived: JWKS endpoint built from SSO_URL + realm
+JWKS_URL = f"{SSO_URL}realms/{SSO_REALM}/protocol/openid-connect/certs" if SSO_URL and SSO_REALM else None
 
 # Database
 DB_DSN = os.getenv("DB_DSN", "postgresql://myuser:mypassword@localhost:5432/karmayogi_db")
