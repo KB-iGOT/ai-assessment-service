@@ -19,7 +19,7 @@ st.set_page_config(page_title="Assessment Generator V2 (Interactive)", layout="w
 
 # --- Sidebar: Auth & Config ---
 st.sidebar.title("⚙️ Configuration")
-auth_token = st.sidebar.text_input("Auth Token (JWT)", type="password", help="Enter your x-auth-token from iGot")
+auth_token = st.sidebar.text_input("Auth Token (JWT)", type="password", help="Enter your x-authenticated-user-token from iGot")
 
 if not auth_token:
     st.sidebar.warning("⚠️ Auth Token is required for V2 API")
@@ -29,7 +29,7 @@ force_new = st.sidebar.checkbox("Bypass Cache (Force New)", value=False)
 # Headers helper
 def get_headers():
     return {
-        "x-auth-token": auth_token,
+        "x-authenticated-user-token": auth_token,
         "bg-bypass-cache": "true" if force_new else "false"
     }
 
