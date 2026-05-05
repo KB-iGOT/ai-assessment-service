@@ -14,8 +14,12 @@ else:
 
 # API Configuration
 KARMAYOGI_API_KEY = os.getenv("KARMAYOGI_API_KEY", "")
-SEARCH_API_URL = os.getenv("SEARCH_API_URL")
-TRANSCODER_STATS_URL = os.getenv("TRANSCODER_STATS_URL")
+KARMAYOGI_BASE_URL = os.getenv("KARMAYOGI_BASE_URL", "https://igotkarmayogi.gov.in")
+LEARNING_AI_BASE_URL = os.getenv("LEARNING_AI_BASE_URL", "https://learning-ai.prod.karmayogibharat.net")
+
+# Derived API endpoints
+SEARCH_API_URL = f"{KARMAYOGI_BASE_URL}/api/content/v1/search"
+TRANSCODER_STATS_URL = f"{LEARNING_AI_BASE_URL}/api/kb-pipeline/v3/transcoder/stats"
 
 # SSO / Auth Configuration
 SSO_URL = os.getenv("SUNBIRD_SSO_URL")
