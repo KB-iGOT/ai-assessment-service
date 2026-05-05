@@ -165,7 +165,7 @@ The V2 API is the production-ready, event-driven iteration. It introduces **Auth
 
 - **Base URL**: `http://localhost:8000/ai-assessment-generation/api/v2`
 - **Authentication**: All V2 endpoints require a valid JWT.
-  - **Header (preferred)**: `x-auth-token: <jwt>`
+  - **Header (preferred)**: `x-authenticated-user-token: <jwt>`
   - **Query param (browser downloads)**: `?token=<jwt>`
 
 ### 1. Generate Assessment (Async)
@@ -309,7 +309,7 @@ Every question object includes:
 
 ```bash
 curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_1144540583527301121908"' \
 --form 'assessment_type="practice"' \
 --form 'difficulty="intermediate"' \
@@ -325,7 +325,7 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate'
 
 ```bash
 curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_courseA123,do_courseB456"' \
 --form 'assessment_type="comprehensive"' \
 --form 'difficulty="advanced"' \
@@ -341,7 +341,7 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate'
 
 ```bash
 curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'assessment_type="standalone"' \
 --form 'difficulty="beginner"' \
 --form 'language="english"' \
@@ -356,14 +356,14 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate'
 
 ```bash
 curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/status/comprehensive_do_courseA123_do_courseB456' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
 ### Example 5: Fetch User History
 
 ```bash
 curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/history' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
 **Response (snippet):**

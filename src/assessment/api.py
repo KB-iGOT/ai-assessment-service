@@ -36,6 +36,13 @@ logger = logging.getLogger("assessment-api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up Assessment API...")
+
+    from .config import SSO_URL, SSO_REALM, JWKS_URL
+    missing = [name for name, val in [("SUNBIRD_SSO_URL", SSO_URL), ("SUNBIRD_SSO_REALM", SSO_REALM)] if not val]
+    if missing:
+        raise RuntimeError(f"Missing mandatory env vars: {', '.join(missing)}")
+    logger.info(f"SSO configured: {JWKS_URL}")
+
     try:
         await init_db()
     except Exception as e:
@@ -381,7 +388,7 @@ async def generate_v2(
 ):
     """
     V2 Generation Endpoint:
-    1. Authenticated: Requires valid `x-auth-token` (User ID extraction).
+    1. Authenticated: Requires valid `x-authenticated-user-token` (User ID extraction).
     2. Private Instances: Every request gets a unique Job ID (Hash + UserID).
     3. Clone-on-Request: If a matching assessment exists (even from another user), it is instantly CLONED to this user's workspace.
     4. Async/Sync Hybrid: 

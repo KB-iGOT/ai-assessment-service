@@ -4,13 +4,12 @@ import jwt
 from typing import Optional, Dict, Any
 from fastapi import Request, HTTPException, Security
 from fastapi.security import APIKeyHeader
-from functools import lru_cache
 from .config import JWKS_URL, SSO_URL, SSO_REALM, REQUIRED_ROLE
 
 logger = logging.getLogger(__name__)
 
 # Security Scheme for Swagger UI (API Key Header)
-api_key_header = APIKeyHeader(name="x-auth-token", auto_error=False)
+api_key_header = APIKeyHeader(name="x-authenticated-user-token", auto_error=False)
 
 class KeyManager:
     """
@@ -59,15 +58,11 @@ class KeyManager:
             raise e
 
 def check_iss(iss: str) -> bool:
-    if not SSO_URL or not SSO_REALM:
-        logger.warning("SSO_URL or SSO_REALM not configured — skipping issuer check")
-        return True
     realm_url = SSO_URL + "realms/" + SSO_REALM
     return realm_url.lower() == iss.lower()
 
 def check_role(payload: Dict[str, Any]) -> bool:
-    # Keycloak puts realm roles under realm_access.roles
-    roles = payload.get("realm_access", {}).get("roles", [])
+    roles = payload.get("user_roles", [])
     return REQUIRED_ROLE in roles
 
 # Singleton Instance
@@ -78,7 +73,7 @@ def get_key_manager() -> KeyManager:
 
 async def validate_token(token: str) -> Dict[str, Any]:
     """
-    Validates the 'x-auth-token' (JWT).
+    Validates the 'x-authenticated-user-token' (JWT).
     Logic mirrors the provided Java exemplar:
     1. Decode Header to get 'kid'.
     2. Fetch Public Key.
