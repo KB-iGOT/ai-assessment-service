@@ -145,7 +145,7 @@ Copy `.env.example` to `.env` and configure:
 
 | Variable | Description | Example |
 | :--- | :--- | :--- |
-| `DB_DSN` | PostgreSQL connection string | `postgresql://user:pass@db:5432/karmayogi_db` |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@db:5432/karmayogi_db` |
 | `GOOGLE_PROJECT_ID` | GCP project ID | `my-gcp-project` |
 | `GOOGLE_LOCATION` | Vertex AI region | `us-central1` |
 | `GENAI_MODEL_NAME` | Gemini model name | `gemini-2.5-pro` |

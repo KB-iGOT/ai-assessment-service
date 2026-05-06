@@ -24,7 +24,7 @@ services:
       - kafka
     environment:
       - PYTHONPATH=/app/src
-      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
+      - DATABASE_URL=postgresql://myuser:mypassword@db:5432/karmayogi_db
       - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
       - GOOGLE_LOCATION=${GOOGLE_LOCATION}
       - GENAI_MODEL_NAME=${GENAI_MODEL_NAME}
@@ -45,7 +45,7 @@ services:
       - kafka
     environment:
       - PYTHONPATH=/app/src
-      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
+      - DATABASE_URL=postgresql://myuser:mypassword@db:5432/karmayogi_db
       - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
       - GOOGLE_LOCATION=${GOOGLE_LOCATION}
       - GENAI_MODEL_NAME=${GENAI_MODEL_NAME}
