@@ -39,9 +39,9 @@ def verify():
     # 3. Check Config Values
     try:
         sys.path.append(str(base_path / "src"))
-        from assessment.config import INTERACTIVE_COURSES_PATH, DB_DSN
+        from assessment.config import INTERACTIVE_COURSES_PATH, DATABASE_URL
         print(f"[INFO] COURSES_PATH: {INTERACTIVE_COURSES_PATH}")
-        print(f"[INFO] DB_DSN: {DB_DSN}")
+        print(f"[INFO] DATABASE_URL: {DATABASE_URL}")
     except ImportError as e:
         print(f"[ERROR] Could not import config.py: {e}")
 

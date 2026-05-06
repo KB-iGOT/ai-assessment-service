@@ -14,7 +14,7 @@ from google.genai.errors import APIError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .config import (
-    DB_DSN,
+    DATABASE_URL,
     GOOGLE_PROJECT_ID, GOOGLE_LOCATION, GENAI_MODEL_NAME, 
     GOOGLE_APPLICATION_CREDENTIALS, PROMPT_VERSION
 )

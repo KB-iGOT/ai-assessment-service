@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from .config import DB_DSN
+from .config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS interactive_assessments (
 """
 
 async def get_conn() -> asyncpg.Connection:
-    conn = await asyncpg.connect(DB_DSN)
+    conn = await asyncpg.connect(DATABASE_URL)
     for type_name in ['json', 'jsonb']:
         await conn.set_type_codec(
             type_name,
