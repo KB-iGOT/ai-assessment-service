@@ -2,7 +2,6 @@ import os
 import shutil
 import logging
 import json
-import pandas as pd
 from pathlib import Path
 from typing import List, Optional, Union
 from fastapi import FastAPI, BackgroundTasks, UploadFile, File, Form, HTTPException, APIRouter
@@ -10,13 +9,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 
-from .db import init_db, close_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
-from .fetcher import fetch_course_data
+from .db import init_db, close_db, create_job, get_assessment_status, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
 from .config import INTERACTIVE_COURSES_PATH
-from .generator import generate_assessment
 from .exporters import generate_pdf, generate_docx
 from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
-from .events import send_completion_event, stop_kafka_producer, send_request_event
+from .events import stop_kafka_producer, send_request_event
 from .exporters_csv_v2 import generate_csv_v2
 
 # Configure Logging
@@ -63,31 +60,18 @@ app = FastAPI(
     description="Audit-ready event-driven assessment generation using Gemini 2.5 Pro and Kafka",
     version="2.0.0",
     lifespan=lifespan,
-    root_path="/ai-assessment-generation",
-    servers=[{"url": "/ai-assessment-generation", "description": "Default Server"}],
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
 
-# Routers
-# Routers
-api_v1_router = APIRouter(prefix="/api/v1", tags=["API V1"])
-
 @app.get("/", include_in_schema=False)
 async def root():
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/ai-assessment-generation/docs")
+    return RedirectResponse(url="/docs")
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "assessment-generator"}
-
-@api_v1_router.get("/status/{job_id}")
-async def check_status(job_id: str):
-    status = await get_assessment_status(job_id)
-    if not status:
-        return JSONResponse(status_code=404, content={"status": "NOT_FOUND"})
-    return status
 
 from enum import Enum
 from typing import List, Optional, Dict
@@ -124,245 +108,15 @@ class QuestionType(str, Enum):
     MULTICHOICE = "multichoice"
     TRUE_FALSE = "truefalse"
 
-@api_v1_router.post("/generate")
-async def generate(
-    background_tasks: BackgroundTasks,
-    course_ids: Optional[List[str]] = Form(None, description="List of Course IDs (or comma-separated string)"),
-    force: bool = Form(False),
-    assessment_type: AssessmentType = Form(...),
-    difficulty: Difficulty = Form(...),
-    total_questions: int = Form(5),
-    question_type_counts: str = Form(
-        '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}',
-        description='JSON: mcq, ftb, mtf, multichoice, truefalse counts. Example: mcq=5, ftb=5, mtf=5, multichoice=5, truefalse=5'
-    ),
-    time_limit: Optional[int] = Form(None, description="Time limit in minutes"),
-    topic_names: Optional[str] = Form("", description="Comma-separated topics"),
-    language: Language = Form(Language.ENGLISH),
-    blooms_config: Optional[str] = Form(
-        '{"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Evaluate": 10, "Create": 0}',
-        description="JSON string of Bloom's percentage per level"
-    ),
-    enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
-    course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
-    additional_instructions: Optional[str] = Form(""),
-    files: Optional[List[Union[UploadFile, str]]] = File(None)
-):
-    # Robust File Handling (Workaround for Swagger UI defaults)
-    valid_files = []
-    if files:
-        for f in files:
-            # Check for invalid strings (Swagger UI "string" default)
-            # Accept anything else (Starlette UploadFile, FastAPI UploadFile)
-            if not isinstance(f, str):
-                valid_files.append(f)
-    
-    files = valid_files
-
-    # Sanitize optional string inputs (Swagger sometimes sends "string" or "")
-    if topic_names in ["string", ""]: topic_names = None
-    if blooms_config in ["string", ""]: blooms_config = None
-    if additional_instructions in ["string", ""]: additional_instructions = None
-    
-    # Parse List Inputs (Support both List[str] and comma-separated string fallback)
-    c_ids = []
-    if course_ids:
-        for item in course_ids:
-            c_ids.extend([c.strip() for c in item.split(",") if c.strip()])
-    
-    # Validation: Must have Content
-    if not c_ids and not valid_files:
-        raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
-
-    # Validate Question Types
-    valid_types = {t.value for t in QuestionType}
-
-    q_counts: Dict[str, int] = json.loads(question_type_counts)
-    q_types = list(q_counts.keys())
-    
-    for qtype, count in q_counts.items():
-        if qtype not in valid_types:
-            raise HTTPException(400, f"Unknown question type: {qtype}")
-        if count <= 0:
-            raise HTTPException(400, f"Invalid question count for {qtype}")
-
-
-    t_names = [t.strip() for t in topic_names.split(",")] if topic_names else None
-    
-    # Parse Bloom's Config
-    b_dist = None
-    if blooms_config:
-        try:
-            b_dist = json.loads(blooms_config)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON for blooms_config")
-
-    import hashlib
-    # Generate Parameter Hash for Cache Invalidation
-    param_list = [
-        str(assessment_type),
-        str(difficulty),
-        str(total_questions),
-        str(q_counts),
-        str(sorted(q_types)), # Sort for consistency
-        str(time_limit),
-        str(topic_names),
-        str(language),
-        str(blooms_config),
-        str(enable_blooms),
-        str(course_weightage),
-        str(additional_instructions)
-    ]
-    if files:
-         param_list.extend([f.filename for f in valid_files])
-
-    param_str = "_".join(param_list)
-    param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
-
-    # Composite Key for Caching (Sorted course IDs + Hash)
-    if c_ids:
-        sorted_ids = sorted(c_ids)
-        base_id = f"comprehensive_{'_'.join(sorted_ids)}" if len(sorted_ids) > 1 else sorted_ids[0]
-    else:
-        base_id = "custom_upload"
-        
-    composite_id = f"{base_id}_{param_hash}"
-
-    existing = await get_assessment_status(composite_id)
-    if existing and existing['status'] == 'COMPLETED' and not force:
-        return {"message": "Assessment already exists", "status": "COMPLETED", "job_id": composite_id}
-    
-    if existing and existing['status'] == 'IN_PROGRESS':
-        return {"message": "Assessment generation in progress", "status": "IN_PROGRESS", "job_id": composite_id}
-
-    await create_job(composite_id)
-    
-    saved_files = []
-    if files:
-        # Use first course ID for temp storage OR 'custom_uploads' folder if no course ID
-        storage_folder_name = sorted_ids[0] if c_ids else "custom_uploads"
-        temp_dir = Path(INTERACTIVE_COURSES_PATH) / storage_folder_name / "uploads"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        for file in files:
-            file_path = temp_dir / file.filename
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            saved_files.append(file_path)
-            logger.info(f"Successfully saved uploaded file: {file.filename} to {file_path}")
-
-    # Construct Payload for Worker
-    worker_payload = {
-        "job_id": composite_id,
-        "user_id": "unknown", # V1 doesn't track user
-        "course_ids": c_ids,
-        "extra_files": [str(p) for p in saved_files],
-        "assessment_type": assessment_type.value if hasattr(assessment_type, 'value') else assessment_type,
-        "difficulty": difficulty.value if hasattr(difficulty, 'value') else difficulty,
-        "total_questions": total_questions,
-        "question_type_counts": q_counts,
-        "additional_instructions": additional_instructions,
-        "language": language.value if hasattr(language, 'value') else language,
-        "topic_names": t_names,
-        "blooms_distribution": b_dist,
-        "enable_blooms": enable_blooms,
-        "course_weightage": course_weightage,
-        "question_types": q_types,
-        "time_limit": time_limit
-    }
-
-    # Dispatch to Kafka
-    await send_request_event(worker_payload)
-    
-    return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": composite_id}
-
-@api_v1_router.get("/download_csv/{job_id}")
-async def download_csv(job_id: str):
-    data = await get_assessment_status(job_id)
-    if not data or data['status'] != 'COMPLETED':
-        raise HTTPException(status_code=404, detail="Assessment not ready or found")
-    
-    assessment_json = data['assessment_data']
-    
-    # Flatten logic for new structure
-    rows = []
-    questions_obj = assessment_json.get("questions", {})
-    
-    for q_type, q_list in questions_obj.items():
-        for q in q_list:
-            row = {
-                "Question ID": q.get("question_id"),
-                "Type": q_type,
-                "Text": q.get("question_text", "N/A"),
-                "Options/Pairs": json.dumps(q.get("options") or q.get("pairs") or "", ensure_ascii=False),
-                "Correct Answer": (
-                    ",".join(map(str, q.get("correct_option_index"))) if isinstance(q.get("correct_option_index"), list)
-                    else q.get("correct_option_index") if q.get("correct_option_index") is not None 
-                    else q.get("correct_answer")
-                ),
-                "Blooms Level": q.get("blooms_level"),
-                "Difficulty": q.get("difficulty_level"),
-                "Relevance %": q.get("relevance_percentage")
-            }
-            rows.append(row)
-        
-    df = pd.DataFrame(rows)
-    csv_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment.csv"
-    df.to_csv(csv_path, index=False)
-    
-    return FileResponse(csv_path, filename=f"{job_id}_assessment.csv")
-
-@api_v1_router.get("/download_json/{job_id}")
-async def download_json(job_id: str):
-    data = await get_assessment_status(job_id)
-    if not data or data['status'] != 'COMPLETED':
-        raise HTTPException(status_code=404, detail="Assessment not ready or found")
-    
-    assessment_json = data['assessment_data']
-    
-    json_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment.json"
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(assessment_json, f, indent=2, ensure_ascii=False)
-        
-    return FileResponse(json_path, filename=f"{job_id}_assessment.json", media_type='application/json')
-
-@api_v1_router.get("/download_pdf/{job_id}")
-async def download_pdf(job_id: str):
-    data = await get_assessment_status(job_id)
-    if not data or data['status'] != 'COMPLETED':
-        raise HTTPException(status_code=404, detail="Assessment not ready or found")
-    
-    assessment_json = data['assessment_data']
-    pdf_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment.pdf"
-    
-    # Remove caching check to ensure font fixes are applied
-    # if not pdf_path.exists():
-    generate_pdf(assessment_json, pdf_path)
-        
-    return FileResponse(pdf_path, filename=f"{job_id}_assessment.pdf", media_type='application/pdf')
-
-@api_v1_router.get("/download_docx/{job_id}")
-async def download_docx(job_id: str):
-    data = await get_assessment_status(job_id)
-    if not data or data['status'] != 'COMPLETED':
-        raise HTTPException(status_code=404, detail="Assessment not ready or found")
-    
-    assessment_json = data['assessment_data']
-    docx_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment.docx"
-    
-    if not docx_path.exists():
-        generate_docx(assessment_json, docx_path)
-        
-    return FileResponse(docx_path, filename=f"{job_id}_assessment.docx", media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-
 # ==========================================
-# API V2 Router (Authenticated & Optimized)
+# API V2 Router
 # ==========================================
 from fastapi import Depends
 from .auth import get_current_user
 
-api_v2_router = APIRouter(prefix="/api/v2", tags=["API V2"])
+api_v2_router = APIRouter(prefix="/ai-assessments/v2", tags=["AI Assessments"])
 
-@api_v2_router.post("/ai-assessments/generate")
+@api_v2_router.post("/generate")
 async def generate_v2(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user), # AUTH REQUIREMENT
@@ -540,7 +294,7 @@ async def generate_v2(
     
     return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": user_job_id}
 
-@api_v2_router.get("/ai-assessments/status/{job_id}", summary="Get Assessment Status")
+@api_v2_router.get("/status/{job_id}", summary="Get Assessment Status")
 async def check_status_v2(job_id: str, user_id: str = Depends(get_current_user)):
     status = await get_assessment_status(job_id)
     if not status:
@@ -553,7 +307,7 @@ from pydantic import BaseModel
 class AssessmentUpdate(BaseModel):
     assessment_data: Dict
 
-@api_v2_router.put("/ai-assessments/update/{job_id}")
+@api_v2_router.put("/update/{job_id}")
 async def update_assessment(
     job_id: str, 
     payload: AssessmentUpdate, 
@@ -575,7 +329,7 @@ async def update_assessment(
 SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
 
 @api_v2_router.get(
-    "/ai-assessments/download/{job_id}",
+    "/download/{job_id}",
     summary="Download Assessment",
     description=(
         "Download a completed assessment in the specified format.\n\n"
@@ -583,10 +337,10 @@ SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
         "**Authentication:** Pass JWT via `x-authenticated-user-token` header.\n\n"
         "**Ownership:** Only the user who generated the assessment can download it.\n\n"
         "**Examples:**\n"
-        "- `GET /api/v2/ai-assessments/download/{job_id}?format=csv`\n"
-        "- `GET /api/v2/ai-assessments/download/{job_id}?format=json`\n"
-        "- `GET /api/v2/ai-assessments/download/{job_id}?format=pdf`\n"
-        "- `GET /api/v2/ai-assessments/download/{job_id}?format=docx`"
+        "- `GET /ai-assessments/v2/download/{job_id}?format=csv`\n"
+        "- `GET /ai-assessments/v2/download/{job_id}?format=json`\n"
+        "- `GET /ai-assessments/v2/download/{job_id}?format=pdf`\n"
+        "- `GET /ai-assessments/v2/download/{job_id}?format=docx`"
     )
 )
 async def download_assessment_v2(
@@ -631,7 +385,7 @@ async def download_assessment_v2(
         generate_docx(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-@api_v2_router.get("/ai-assessments/history")
+@api_v2_router.get("/history")
 async def get_history(user_id: str = Depends(get_current_user)):
     """
     Returns a list of all assessments previously generated or cloned by the authenticated user.
@@ -654,7 +408,6 @@ async def get_history(user_id: str = Depends(get_current_user)):
         
     return formatted_history
 
-app.include_router(api_v1_router)
 app.include_router(api_v2_router)
 
 
@@ -674,7 +427,7 @@ def custom_openapi():
     try:
         paths = openapi_schema.get("paths", {})
         for path, methods in paths.items():
-            if path.endswith("/ai-assessments/generate"):
+            if path.endswith("/v2/generate"):
                 post = methods.get("post", {})
                 content = post.get("requestBody", {},).get("content", {})
                 multipart = content.get("multipart/form-data", {})
