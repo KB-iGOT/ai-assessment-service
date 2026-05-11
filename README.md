@@ -481,17 +481,6 @@ curl -H 'x-authenticated-user-token: YOUR_JWT' \
 
 ---
 
-## Legacy V1 API
-
-Still available at `/api/v1/...` for backward compatibility. Does not support cloning, editing, or user separation.
-
-- `POST /api/v1/generate` — Start generation
-- `GET /api/v1/status/{job_id}` — Poll status
-- `GET /api/v1/download_csv/{job_id}` — Download CSV
-- `GET /api/v1/download_json/{job_id}` — Download JSON
-- `GET /api/v1/download_pdf/{job_id}` — Download PDF
-- `GET /api/v1/download_docx/{job_id}` — Download DOCX
-
 ---
 
 ## Governance Rules
