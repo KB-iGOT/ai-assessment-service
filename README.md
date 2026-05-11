@@ -159,12 +159,12 @@ Copy `.env.example` to `.env` and configure:
 
 ---
 
-## API Reference (V2) — Recommended
+## API Reference
 
-The V2 API is the production-ready, event-driven iteration. It introduces **Authentication**, **Private Workspaces**, and instant **Cloning**.
+The API is the production-ready, event-driven iteration. It introduces **Authentication**, **Private Workspaces**, and instant **Cloning**.
 
-- **Base URL**: `http://localhost:8000/ai-assessment-generation/api/v2`
-- **Authentication**: All V2 endpoints require a valid JWT via the `x-authenticated-user-token` header.
+- **Base URL**: `http://localhost:8000/ai-assessments/v1`
+- **Authentication**: All endpoints require a valid JWT via the `x-authenticated-user-token` header.
 
 ### 1. Generate Assessment (Async)
 - **Endpoint**: `POST /ai-assessments/generate` — `multipart/form-data`
@@ -220,7 +220,7 @@ The V2 API is the production-ready, event-driven iteration. It introduces **Auth
 > ```js
 > async function downloadAssessment(jobId, format, token) {
 >   const response = await fetch(
->     `/ai-assessment-generation/api/v2/ai-assessments/download/${jobId}?format=${format}`,
+>     `/ai-assessments/v1/download/${jobId}?format=${format}`,
 >     { headers: { 'x-authenticated-user-token': token } }
 >   );
 >   if (!response.ok) throw new Error(`Download failed: ${response.status}`);
@@ -243,7 +243,7 @@ Assessment generation is asynchronous (LLM latency + file processing). Follow th
 ### Step 1: Start Generation
 
 ```bash
-POST /api/v2/ai-assessments/generate
+POST /ai-assessments/v1/generate
 ```
 
 **Response (new job):**
@@ -266,7 +266,7 @@ POST /api/v2/ai-assessments/generate
 
 ### Step 2: Poll for Status
 
-Poll `GET /api/v2/ai-assessments/status/{job_id}` every 5–10 seconds:
+Poll `GET /ai-assessments/v1/status/{job_id}` every 5–10 seconds:
 
 | Status | Meaning | Suggested UI Action |
 | :--- | :--- | :--- |
@@ -328,7 +328,7 @@ Every question object includes:
 ### Example 1: Standard Assessment (Single Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/generate' \
+curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_1144540583527301121908"' \
 --form 'assessment_type="practice"' \
@@ -344,7 +344,7 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assess
 ### Example 2: Comprehensive Assessment (Cross-Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/generate' \
+curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_courseA123,do_courseB456"' \
 --form 'assessment_type="comprehensive"' \
@@ -360,7 +360,7 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assess
 ### Example 3: Standalone Assessment (File Upload)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/generate' \
+curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'assessment_type="standalone"' \
 --form 'difficulty="beginner"' \
@@ -375,14 +375,14 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assess
 ### Example 4: Poll Job Status
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/status/comprehensive_do_courseA123_do_courseB456' \
+curl --location 'http://localhost:8000/ai-assessments/v1/status/comprehensive_do_courseA123_do_courseB456' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
 ### Example 5: Fetch User History
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/history' \
+curl --location 'http://localhost:8000/ai-assessments/v1/history' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
@@ -405,22 +405,22 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assess
 ```bash
 # CSV
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/download/{job_id}?format=csv' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=csv' \
   --output assessment.csv
 
 # JSON
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/download/{job_id}?format=json' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=json' \
   --output assessment.json
 
 # PDF
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/download/{job_id}?format=pdf' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=pdf' \
   --output assessment.pdf
 
 # Word (DOCX)
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/download/{job_id}?format=docx' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=docx' \
   --output assessment.docx
 ```
 
@@ -480,17 +480,6 @@ curl -H 'x-authenticated-user-token: YOUR_JWT' \
 ```
 
 ---
-
-## Legacy V1 API
-
-Still available at `/api/v1/...` for backward compatibility. Does not support cloning, editing, or user separation.
-
-- `POST /api/v1/generate` — Start generation
-- `GET /api/v1/status/{job_id}` — Poll status
-- `GET /api/v1/download_csv/{job_id}` — Download CSV
-- `GET /api/v1/download_json/{job_id}` — Download JSON
-- `GET /api/v1/download_pdf/{job_id}` — Download PDF
-- `GET /api/v1/download_docx/{job_id}` — Download DOCX
 
 ---
 
