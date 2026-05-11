@@ -167,7 +167,7 @@ The V2 API is the production-ready, event-driven iteration. It introduces **Auth
 - **Authentication**: All V2 endpoints require a valid JWT via the `x-authenticated-user-token` header.
 
 ### 1. Generate Assessment (Async)
-- **Endpoint**: `POST /generate` — `multipart/form-data`
+- **Endpoint**: `POST /ai-assessments` — `multipart/form-data`
 - **Description**: Starts an event-driven generation job, or instantly clones an existing one if the same parameters were previously requested.
 - **Response**:
   - `202 Accepted` (`status: PENDING`) — New background job started.
@@ -189,38 +189,38 @@ The V2 API is the production-ready, event-driven iteration. It introduces **Auth
 | `files` | File | PDF or VTT files for standalone assessments |
 
 ### 2. Check Status
-- **Endpoint**: `GET /status/{job_id}`
+- **Endpoint**: `GET /ai-assessments/{job_id}`
 - **Response**: Returns `status` (`PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`). When `COMPLETED`, includes the full `assessment_data` object.
 
 ### 3. Edit Assessment
-- **Endpoint**: `PUT /assessment/{job_id}`
+- **Endpoint**: `PUT /ai-assessments/{job_id}`
 - **Description**: Allows the owner to manually edit questions before finalising.
 - **Body**: `{"assessment_data": { ... }}`
 
 ### 4. Fetch User History
-- **Endpoint**: `GET /history`
+- **Endpoint**: `GET /ai-assessments`
 - **Description**: Returns all assessment jobs (any status) initiated by the authenticated user.
 - **Response**: Array of `{job_id, status, created_at, updated_at, config, error_message}`.
 
 ### 5. Download Results
-- **Endpoint**: `GET /download/{job_id}?format=<format>`
+- **Endpoint**: `GET /ai-assessments/{job_id}/download?format=<format>`
 - **Supported formats**: `csv`, `json`, `pdf`, `docx`
 - **Ownership**: Only the user who generated the assessment can download it — others get `403 Forbidden`.
 - **Invalid format**: Returns `400 Bad Request` with the list of supported formats.
 
 | Format | Endpoint |
 | :--- | :--- |
-| CSV (7-option V2 schema) | `GET /download/{job_id}?format=csv` |
-| JSON | `GET /download/{job_id}?format=json` |
-| PDF | `GET /download/{job_id}?format=pdf` |
-| Word (DOCX) | `GET /download/{job_id}?format=docx` |
+| CSV (7-option V2 schema) | `GET /ai-assessments/{job_id}/download?format=csv` |
+| JSON | `GET /ai-assessments/{job_id}/download?format=json` |
+| PDF | `GET /ai-assessments/{job_id}/download?format=pdf` |
+| Word (DOCX) | `GET /ai-assessments/{job_id}/download?format=docx` |
 
 > **UI Integration Note**: Do NOT use `<a href>` links with the token in the URL — this leaks the JWT in server logs and browser history. Use the fetch + Blob pattern instead:
 >
 > ```js
 > async function downloadAssessment(jobId, format, token) {
 >   const response = await fetch(
->     `/ai-assessment-generation/api/v2/download/${jobId}?format=${format}`,
+>     `/ai-assessment-generation/api/v2/ai-assessments/${jobId}/download?format=${format}`,
 >     { headers: { 'x-authenticated-user-token': token } }
 >   );
 >   if (!response.ok) throw new Error(`Download failed: ${response.status}`);
@@ -243,7 +243,7 @@ Assessment generation is asynchronous (LLM latency + file processing). Follow th
 ### Step 1: Start Generation
 
 ```bash
-POST /api/v2/generate
+POST /api/v2/ai-assessments
 ```
 
 **Response (new job):**
@@ -266,7 +266,7 @@ POST /api/v2/generate
 
 ### Step 2: Poll for Status
 
-Poll `GET /api/v2/status/{job_id}` every 5–10 seconds:
+Poll `GET /api/v2/ai-assessments/{job_id}` every 5–10 seconds:
 
 | Status | Meaning | Suggested UI Action |
 | :--- | :--- | :--- |
@@ -328,7 +328,7 @@ Every question object includes:
 ### Example 1: Standard Assessment (Single Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_1144540583527301121908"' \
 --form 'assessment_type="practice"' \
@@ -344,7 +344,7 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate'
 ### Example 2: Comprehensive Assessment (Cross-Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_courseA123,do_courseB456"' \
 --form 'assessment_type="comprehensive"' \
@@ -360,7 +360,7 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate'
 ### Example 3: Standalone Assessment (File Upload)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'assessment_type="standalone"' \
 --form 'difficulty="beginner"' \
@@ -375,14 +375,14 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/generate'
 ### Example 4: Poll Job Status
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/status/comprehensive_do_courseA123_do_courseB456' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/comprehensive_do_courseA123_do_courseB456' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
 ### Example 5: Fetch User History
 
 ```bash
-curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/history' \
+curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
@@ -405,22 +405,22 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/history' 
 ```bash
 # CSV
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=csv' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/{job_id}/download?format=csv' \
   --output assessment.csv
 
 # JSON
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=json' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/{job_id}/download?format=json' \
   --output assessment.json
 
 # PDF
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=pdf' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/{job_id}/download?format=pdf' \
   --output assessment.pdf
 
 # Word (DOCX)
 curl -H 'x-authenticated-user-token: YOUR_JWT' \
-  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=docx' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/ai-assessments/{job_id}/download?format=docx' \
   --output assessment.docx
 ```
 
