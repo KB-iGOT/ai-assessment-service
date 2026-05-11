@@ -362,7 +362,7 @@ from .auth import get_current_user
 
 api_v2_router = APIRouter(prefix="/api/v2", tags=["API V2"])
 
-@api_v2_router.post("/ai-assessments")
+@api_v2_router.post("/ai-assessments/generate")
 async def generate_v2(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user), # AUTH REQUIREMENT
@@ -540,7 +540,7 @@ async def generate_v2(
     
     return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": user_job_id}
 
-@api_v2_router.get("/ai-assessments/{job_id}", summary="Get Assessment Status")
+@api_v2_router.get("/ai-assessments/status/{job_id}", summary="Get Assessment Status")
 async def check_status_v2(job_id: str, user_id: str = Depends(get_current_user)):
     status = await get_assessment_status(job_id)
     if not status:
@@ -553,7 +553,7 @@ from pydantic import BaseModel
 class AssessmentUpdate(BaseModel):
     assessment_data: Dict
 
-@api_v2_router.put("/ai-assessments/{job_id}")
+@api_v2_router.put("/ai-assessments/update/{job_id}")
 async def update_assessment(
     job_id: str, 
     payload: AssessmentUpdate, 
@@ -575,7 +575,7 @@ async def update_assessment(
 SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
 
 @api_v2_router.get(
-    "/ai-assessments/{job_id}/download",
+    "/ai-assessments/download/{job_id}",
     summary="Download Assessment",
     description=(
         "Download a completed assessment in the specified format.\n\n"
@@ -583,10 +583,10 @@ SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
         "**Authentication:** Pass JWT via `x-authenticated-user-token` header.\n\n"
         "**Ownership:** Only the user who generated the assessment can download it.\n\n"
         "**Examples:**\n"
-        "- `GET /api/v2/ai-assessments/{job_id}/download?format=csv`\n"
-        "- `GET /api/v2/ai-assessments/{job_id}/download?format=json`\n"
-        "- `GET /api/v2/ai-assessments/{job_id}/download?format=pdf`\n"
-        "- `GET /api/v2/ai-assessments/{job_id}/download?format=docx`"
+        "- `GET /api/v2/ai-assessments/download/{job_id}?format=csv`\n"
+        "- `GET /api/v2/ai-assessments/download/{job_id}?format=json`\n"
+        "- `GET /api/v2/ai-assessments/download/{job_id}?format=pdf`\n"
+        "- `GET /api/v2/ai-assessments/download/{job_id}?format=docx`"
     )
 )
 async def download_assessment_v2(
@@ -631,7 +631,7 @@ async def download_assessment_v2(
         generate_docx(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-@api_v2_router.get("/ai-assessments")
+@api_v2_router.get("/ai-assessments/history")
 async def get_history(user_id: str = Depends(get_current_user)):
     """
     Returns a list of all assessments previously generated or cloned by the authenticated user.
@@ -674,7 +674,7 @@ def custom_openapi():
     try:
         paths = openapi_schema.get("paths", {})
         for path, methods in paths.items():
-            if path.endswith("/generate"):
+            if path.endswith("/ai-assessments/generate"):
                 post = methods.get("post", {})
                 content = post.get("requestBody", {},).get("content", {})
                 multipart = content.get("multipart/form-data", {})
