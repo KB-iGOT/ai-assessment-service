@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional
 import shutil
 
 # Reuse existing modules
-from .db import init_db, update_job_status, save_assessment_result, get_assessment_status
+from .db import init_db, close_db, update_job_status, save_assessment_result, get_assessment_status
 from .fetcher import fetch_course_data
 from .generator import generate_assessment
 from .events import get_kafka_consumer, send_completion_event, stop_kafka_producer
@@ -127,6 +127,7 @@ async def run_worker():
     finally:
         await consumer.stop()
         await stop_kafka_producer()
+        await close_db()
         logger.info("Worker Stopped")
 
 if __name__ == "__main__":

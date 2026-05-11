@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 
-from .db import init_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
+from .db import init_db, close_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
 from .fetcher import fetch_course_data
 from .config import INTERACTIVE_COURSES_PATH
 from .generator import generate_assessment
@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
     
     stop_cleanup_scheduler()
     await stop_kafka_producer()
+    await close_db()
     logger.info("Shutting down Assessment API...")
 
 app = FastAPI(
