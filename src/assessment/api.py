@@ -576,64 +576,64 @@ async def update_assessment(
         
     return {"message": "Assessment updated successfully", "status": "COMPLETED", "job_id": job_id}
 
-@api_v2_router.get("/download_csv/{job_id}")
-async def download_csv_v2(job_id: str, user_id: str = Depends(get_current_user)):
-    """
-    V2 Export: Returns CSV in the specific 7-Option Column format.
-    Includes Answer Rationale and Course Tagging metadata.
-    """
-    data = await get_assessment_status(job_id)
-    if not data or data['status'] != 'COMPLETED':
-        raise HTTPException(status_code=404, detail="Assessment not ready or found")
-        
-    # Check Ownership? For downloads, maybe strictness is good.
-    # if data.get('user_id') != user_id: raise HTTPException(403)
-    
-    assessment_json = data['assessment_data']
-    csv_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.csv"
-    
-    # Always generate fresh to ensure logic update
-    generate_csv_v2(assessment_json, csv_path)
-        
-    return FileResponse(csv_path, filename=f"{job_id}_assessment_v2.csv", media_type='text/csv')
+SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
 
-@api_v2_router.get("/download_json/{job_id}")
-async def download_json_v2(job_id: str, user_id: str = Depends(get_current_user)):
-    data = await get_assessment_status(job_id)
-    if not data or data['status'] != 'COMPLETED':
-        raise HTTPException(status_code=404, detail="Assessment not ready or found")
-    
-    assessment_json = data['assessment_data']
-    json_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.json"
-    
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(assessment_json, f, indent=2, ensure_ascii=False)
-        
-    return FileResponse(json_path, filename=f"{job_id}_assessment.json", media_type='application/json')
+@api_v2_router.get(
+    "/download/{job_id}",
+    summary="Download Assessment",
+    description=(
+        "Download a completed assessment in the specified format.\n\n"
+        "**Supported formats:** `csv`, `json`, `pdf`, `docx`\n\n"
+        "**Authentication:** Pass JWT via `x-authenticated-user-token` header or `?token=` query param (for browser/direct download links).\n\n"
+        "**Ownership:** Only the user who generated the assessment can download it.\n\n"
+        "**Examples:**\n"
+        "- `GET /api/v2/download/{job_id}?format=csv`\n"
+        "- `GET /api/v2/download/{job_id}?format=json`\n"
+        "- `GET /api/v2/download/{job_id}?format=pdf`\n"
+        "- `GET /api/v2/download/{job_id}?format=docx&token=YOUR_JWT`"
+    )
+)
+async def download_assessment_v2(
+    job_id: str,
+    format: str,
+    user_id: str = Depends(get_current_user)
+):
+    if format not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid format '{format}'. Supported formats: {', '.join(sorted(SUPPORTED_FORMATS))}"
+        )
 
-@api_v2_router.get("/download_pdf/{job_id}")
-async def download_pdf_v2(job_id: str, user_id: str = Depends(get_current_user)):
     data = await get_assessment_status(job_id)
     if not data or data['status'] != 'COMPLETED':
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
-    
-    assessment_json = data['assessment_data']
-    pdf_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.pdf"
-    
-    generate_pdf(assessment_json, pdf_path)
-    return FileResponse(pdf_path, filename=f"{job_id}_assessment.pdf", media_type='application/pdf')
 
-@api_v2_router.get("/download_docx/{job_id}")
-async def download_docx_v2(job_id: str, user_id: str = Depends(get_current_user)):
-    data = await get_assessment_status(job_id)
-    if not data or data['status'] != 'COMPLETED':
-        raise HTTPException(status_code=404, detail="Assessment not ready or found")
-    
+    if data.get('user_id') != user_id:
+        raise HTTPException(status_code=403, detail="Access denied: you do not own this assessment")
+
     assessment_json = data['assessment_data']
-    docx_path = Path(INTERACTIVE_COURSES_PATH) / f"{job_id}_assessment_v2.docx"
-    
-    generate_docx(assessment_json, docx_path)
-    return FileResponse(docx_path, filename=f"{job_id}_assessment.docx", media_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    base_path = Path(INTERACTIVE_COURSES_PATH)
+
+    if format == "csv":
+        path = base_path / f"{job_id}_assessment_v2.csv"
+        generate_csv_v2(assessment_json, path)
+        return FileResponse(path, filename=f"{job_id}_assessment.csv", media_type="text/csv")
+
+    elif format == "json":
+        path = base_path / f"{job_id}_assessment_v2.json"
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(assessment_json, f, indent=2, ensure_ascii=False)
+        return FileResponse(path, filename=f"{job_id}_assessment.json", media_type="application/json")
+
+    elif format == "pdf":
+        path = base_path / f"{job_id}_assessment_v2.pdf"
+        generate_pdf(assessment_json, path)
+        return FileResponse(path, filename=f"{job_id}_assessment.pdf", media_type="application/pdf")
+
+    elif format == "docx":
+        path = base_path / f"{job_id}_assessment_v2.docx"
+        generate_docx(assessment_json, path)
+        return FileResponse(path, filename=f"{job_id}_assessment.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 @api_v2_router.get("/history")
 async def get_history(user_id: str = Depends(get_current_user)):

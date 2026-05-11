@@ -164,9 +164,7 @@ Copy `.env.example` to `.env` and configure:
 The V2 API is the production-ready, event-driven iteration. It introduces **Authentication**, **Private Workspaces**, and instant **Cloning**.
 
 - **Base URL**: `http://localhost:8000/ai-assessment-generation/api/v2`
-- **Authentication**: All V2 endpoints require a valid JWT.
-  - **Header (preferred)**: `x-authenticated-user-token: <jwt>`
-  - **Query param (browser downloads)**: `?token=<jwt>`
+- **Authentication**: All V2 endpoints require a valid JWT via the `x-authenticated-user-token` header.
 
 ### 1. Generate Assessment (Async)
 - **Endpoint**: `POST /generate` — `multipart/form-data`
@@ -205,14 +203,36 @@ The V2 API is the production-ready, event-driven iteration. It introduces **Auth
 - **Response**: Array of `{job_id, status, created_at, updated_at, config, error_message}`.
 
 ### 5. Download Results
-All download endpoints support the `?token=` query parameter for browser-based access.
+- **Endpoint**: `GET /download/{job_id}?format=<format>`
+- **Supported formats**: `csv`, `json`, `pdf`, `docx`
+- **Ownership**: Only the user who generated the assessment can download it — others get `403 Forbidden`.
+- **Invalid format**: Returns `400 Bad Request` with the list of supported formats.
 
 | Format | Endpoint |
 | :--- | :--- |
-| CSV (7-option V2 schema) | `GET /download_csv/{job_id}` |
-| JSON | `GET /download_json/{job_id}` |
-| PDF | `GET /download_pdf/{job_id}` |
-| Word (DOCX) | `GET /download_docx/{job_id}` |
+| CSV (7-option V2 schema) | `GET /download/{job_id}?format=csv` |
+| JSON | `GET /download/{job_id}?format=json` |
+| PDF | `GET /download/{job_id}?format=pdf` |
+| Word (DOCX) | `GET /download/{job_id}?format=docx` |
+
+> **UI Integration Note**: Do NOT use `<a href>` links with the token in the URL — this leaks the JWT in server logs and browser history. Use the fetch + Blob pattern instead:
+>
+> ```js
+> async function downloadAssessment(jobId, format, token) {
+>   const response = await fetch(
+>     `/ai-assessment-generation/api/v2/download/${jobId}?format=${format}`,
+>     { headers: { 'x-authenticated-user-token': token } }
+>   );
+>   if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+>   const blob = await response.blob();
+>   const url = URL.createObjectURL(blob);
+>   const a = document.createElement('a');
+>   a.href = url;
+>   a.download = `${jobId}_assessment.${format}`;
+>   a.click();
+>   URL.revokeObjectURL(url);
+> }
+> ```
 
 ---
 
@@ -383,17 +403,25 @@ curl --location 'http://localhost:8000/ai-assessment-generation/api/v2/history' 
 ### Example 6: Download Results
 
 ```bash
-# CSV (7-option V2 schema)
-curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_csv/{job_id}?token=YOUR_JWT'
+# CSV
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=csv' \
+  --output assessment.csv
 
 # JSON
-curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_json/{job_id}?token=YOUR_JWT'
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=json' \
+  --output assessment.json
 
 # PDF
-curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_pdf/{job_id}?token=YOUR_JWT'
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=pdf' \
+  --output assessment.pdf
 
 # Word (DOCX)
-curl 'http://localhost:8000/ai-assessment-generation/api/v2/download_docx/{job_id}?token=YOUR_JWT'
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessment-generation/api/v2/download/{job_id}?format=docx' \
+  --output assessment.docx
 ```
 
 ---
