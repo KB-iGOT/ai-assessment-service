@@ -56,9 +56,9 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Assessment API...")
 
 app = FastAPI(
-    title="Course Assessment Generator API (v2.0)",
+    title="Course Assessment Generator API (v1.0)",
     description="Audit-ready event-driven assessment generation using Gemini 2.5 Pro and Kafka",
-    version="2.0.0",
+    version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs",
     openapi_url="/openapi.json"
@@ -109,15 +109,15 @@ class QuestionType(str, Enum):
     TRUE_FALSE = "truefalse"
 
 # ==========================================
-# API V2 Router
+# API V1 Router
 # ==========================================
 from fastapi import Depends
 from .auth import get_current_user
 
-api_v2_router = APIRouter(prefix="/ai-assessments/v2", tags=["AI Assessments"])
+api_v1_router = APIRouter(prefix="/ai-assessments/v1", tags=["AI Assessments"])
 
-@api_v2_router.post("/generate")
-async def generate_v2(
+@api_v1_router.post("/generate")
+async def generate_v1(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user), # AUTH REQUIREMENT
     course_ids: Optional[List[str]] = Form(None, description="List of Course IDs"),
@@ -294,8 +294,8 @@ async def generate_v2(
     
     return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": user_job_id}
 
-@api_v2_router.get("/status/{job_id}", summary="Get Assessment Status")
-async def check_status_v2(job_id: str, user_id: str = Depends(get_current_user)):
+@api_v1_router.get("/status/{job_id}", summary="Get Assessment Status")
+async def check_status_v1(job_id: str, user_id: str = Depends(get_current_user)):
     status = await get_assessment_status(job_id)
     if not status:
         return JSONResponse(status_code=404, content={"status": "NOT_FOUND"})
@@ -307,8 +307,8 @@ from pydantic import BaseModel
 class AssessmentUpdate(BaseModel):
     assessment_data: Dict
 
-@api_v2_router.put("/update/{job_id}")
-async def update_assessment(
+@api_v1_router.put("/update/{job_id}")
+async def update_assessment_v1(
     job_id: str, 
     payload: AssessmentUpdate, 
     user_id: str = Depends(get_current_user)
@@ -328,7 +328,7 @@ async def update_assessment(
 
 SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
 
-@api_v2_router.get(
+@api_v1_router.get(
     "/download/{job_id}",
     summary="Download Assessment",
     description=(
@@ -337,13 +337,13 @@ SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
         "**Authentication:** Pass JWT via `x-authenticated-user-token` header.\n\n"
         "**Ownership:** Only the user who generated the assessment can download it.\n\n"
         "**Examples:**\n"
-        "- `GET /ai-assessments/v2/download/{job_id}?format=csv`\n"
-        "- `GET /ai-assessments/v2/download/{job_id}?format=json`\n"
-        "- `GET /ai-assessments/v2/download/{job_id}?format=pdf`\n"
-        "- `GET /ai-assessments/v2/download/{job_id}?format=docx`"
+        "- `GET /ai-assessments/v1/download/{job_id}?format=csv`\n"
+        "- `GET /ai-assessments/v1/download/{job_id}?format=json`\n"
+        "- `GET /ai-assessments/v1/download/{job_id}?format=pdf`\n"
+        "- `GET /ai-assessments/v1/download/{job_id}?format=docx`"
     )
 )
-async def download_assessment_v2(
+async def download_assessment_v1(
     job_id: str,
     format: str,
     user_id: str = Depends(get_current_user)
@@ -385,8 +385,8 @@ async def download_assessment_v2(
         generate_docx(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-@api_v2_router.get("/history")
-async def get_history(user_id: str = Depends(get_current_user)):
+@api_v1_router.get("/history")
+async def get_history_v1(user_id: str = Depends(get_current_user)):
     """
     Returns a list of all assessments previously generated or cloned by the authenticated user.
     """
@@ -408,7 +408,7 @@ async def get_history(user_id: str = Depends(get_current_user)):
         
     return formatted_history
 
-app.include_router(api_v2_router)
+app.include_router(api_v1_router)
 
 
 def custom_openapi():
@@ -427,7 +427,7 @@ def custom_openapi():
     try:
         paths = openapi_schema.get("paths", {})
         for path, methods in paths.items():
-            if path.endswith("/v2/generate"):
+            if path.endswith("/v1/generate"):
                 post = methods.get("post", {})
                 content = post.get("requestBody", {},).get("content", {})
                 multipart = content.get("multipart/form-data", {})
