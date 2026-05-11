@@ -151,7 +151,7 @@ with tab_gen:
         with st.spinner("Calling V2 API..."):
             try:
                 # V2 Generate Call
-                r = requests.post(f"{API_V2}/ai-assessments", data=payload, files=files, headers=get_headers())
+                r = requests.post(f"{API_V2}/ai-assessments/generate", data=payload, files=files, headers=get_headers())
                 
                 if r.status_code in [200, 202]:
                     data = r.json()
@@ -287,7 +287,7 @@ with tab_comp:
         
         with st.spinner("Calling V2 API (Comprehensive)..."):
             try:
-                r = requests.post(f"{API_V2}/ai-assessments", data=comp_payload, headers=get_headers())
+                r = requests.post(f"{API_V2}/ai-assessments/generate", data=comp_payload, headers=get_headers())
                 if r.status_code in [200, 202]:
                     data = r.json()
                     st.session_state['current_job_id'] = data.get("job_id")
@@ -317,8 +317,8 @@ with tab_view:
             if not auth_token: st.error("Auth Token Required"); st.stop()
             
             try:
-                # GET /api/v2/ai-assessments/{job_id} — returns status and result when COMPLETED
-                r = requests.get(f"{API_V2}/ai-assessments/{job_id}", headers=get_headers())
+                # GET /api/v2/ai-assessments/status/{job_id} — returns status and result when COMPLETED
+                r = requests.get(f"{API_V2}/ai-assessments/status/{job_id}", headers=get_headers())
                 if r.status_code == 200:
                     st.session_state['fetch_data'] = r.json()
                     st.success("Fetched!")
@@ -344,7 +344,7 @@ with tab_view:
             ]:
                 try:
                     dl_resp = requests.get(
-                        f"{API_V2}/ai-assessments/{job_id}/download",
+                        f"{API_V2}/ai-assessments/download/{job_id}",
                         params={"format": fmt},
                         headers=get_headers(),
                     )
@@ -436,7 +436,7 @@ with tab_view:
                             
                     new_questions_data[q_type] = new_q_list
                 
-                if st.form_submit_button("💾 Save Changes (PUT /api/v2/ai-assessments/{job_id})"):
+                if st.form_submit_button("💾 Save Changes (PUT /api/v2/ai-assessments/update/{job_id})"):
                     # Construct full payload
                     updated_assessment = raw_res.copy()
                     updated_assessment['questions'] = new_questions_data
@@ -445,7 +445,7 @@ with tab_view:
 
                     try:
                         r_upd = requests.put(
-                            f"{API_V2}/ai-assessments/{job_id}",
+                            f"{API_V2}/ai-assessments/update/{job_id}",
                             json=update_payload,
                             headers=get_headers()
                         )
@@ -471,7 +471,7 @@ with tab_history:
         else:
             with st.spinner("Fetching history..."):
                 try:
-                    r_hist = requests.get(f"{API_V2}/ai-assessments", headers=get_headers())
+                    r_hist = requests.get(f"{API_V2}/ai-assessments/history", headers=get_headers())
                     if r_hist.status_code == 200:
                         st.session_state['history_data'] = r_hist.json()
                     else:
@@ -524,7 +524,7 @@ with tab_history:
                         ]:
                             try:
                                 dl_r = requests.get(
-                                    f"{API_V2}/ai-assessments/{job_id}/download",
+                                    f"{API_V2}/ai-assessments/download/{job_id}",
                                     params={"format": fmt},
                                     headers=get_headers(),
                                 )
