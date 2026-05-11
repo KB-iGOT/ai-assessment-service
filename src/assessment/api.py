@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 
-from .db import init_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
+from .db import init_db, close_db, create_job, update_job_status, get_assessment_status, save_assessment_result, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
 from .fetcher import fetch_course_data
 from .config import INTERACTIVE_COURSES_PATH
 from .generator import generate_assessment
@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
     
     stop_cleanup_scheduler()
     await stop_kafka_producer()
+    await close_db()
     logger.info("Shutting down Assessment API...")
 
 app = FastAPI(
@@ -361,7 +362,7 @@ from .auth import get_current_user
 
 api_v2_router = APIRouter(prefix="/api/v2", tags=["API V2"])
 
-@api_v2_router.post("/generate")
+@api_v2_router.post("/ai-assessments")
 async def generate_v2(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user), # AUTH REQUIREMENT
@@ -535,29 +536,24 @@ async def generate_v2(
         "time_limit": time_limit
     }
 
-    # Dispatch to Kafka
-    print("DEBUG WORKER PAYLOAD:", worker_payload)
     await send_request_event(worker_payload)
     
     return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": user_job_id}
 
-@api_v2_router.get("/status/{job_id}")
+@api_v2_router.get("/ai-assessments/{job_id}", summary="Get Assessment Status")
 async def check_status_v2(job_id: str, user_id: str = Depends(get_current_user)):
     status = await get_assessment_status(job_id)
     if not status:
         return JSONResponse(status_code=404, content={"status": "NOT_FOUND"})
-    
-    # Strict Access Control
-    # if status.get('user_id') and status.get('user_id') != user_id:
-    #    raise HTTPException(403, "Access Denied")
-        
+    if status.get('user_id') and status.get('user_id') != user_id:
+        raise HTTPException(status_code=403, detail="Access denied: you do not own this assessment")
     return status
 
 from pydantic import BaseModel
 class AssessmentUpdate(BaseModel):
     assessment_data: Dict
 
-@api_v2_router.put("/assessment/{job_id}")
+@api_v2_router.put("/ai-assessments/{job_id}")
 async def update_assessment(
     job_id: str, 
     payload: AssessmentUpdate, 
@@ -579,18 +575,18 @@ async def update_assessment(
 SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
 
 @api_v2_router.get(
-    "/download/{job_id}",
+    "/ai-assessments/{job_id}/download",
     summary="Download Assessment",
     description=(
         "Download a completed assessment in the specified format.\n\n"
         "**Supported formats:** `csv`, `json`, `pdf`, `docx`\n\n"
-        "**Authentication:** Pass JWT via `x-authenticated-user-token` header or `?token=` query param (for browser/direct download links).\n\n"
+        "**Authentication:** Pass JWT via `x-authenticated-user-token` header.\n\n"
         "**Ownership:** Only the user who generated the assessment can download it.\n\n"
         "**Examples:**\n"
-        "- `GET /api/v2/download/{job_id}?format=csv`\n"
-        "- `GET /api/v2/download/{job_id}?format=json`\n"
-        "- `GET /api/v2/download/{job_id}?format=pdf`\n"
-        "- `GET /api/v2/download/{job_id}?format=docx&token=YOUR_JWT`"
+        "- `GET /api/v2/ai-assessments/{job_id}/download?format=csv`\n"
+        "- `GET /api/v2/ai-assessments/{job_id}/download?format=json`\n"
+        "- `GET /api/v2/ai-assessments/{job_id}/download?format=pdf`\n"
+        "- `GET /api/v2/ai-assessments/{job_id}/download?format=docx`"
     )
 )
 async def download_assessment_v2(
@@ -635,7 +631,7 @@ async def download_assessment_v2(
         generate_docx(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
-@api_v2_router.get("/history")
+@api_v2_router.get("/ai-assessments")
 async def get_history(user_id: str = Depends(get_current_user)):
     """
     Returns a list of all assessments previously generated or cloned by the authenticated user.

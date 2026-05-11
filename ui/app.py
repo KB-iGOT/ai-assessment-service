@@ -151,7 +151,7 @@ with tab_gen:
         with st.spinner("Calling V2 API..."):
             try:
                 # V2 Generate Call
-                r = requests.post(f"{API_V2}/generate", data=payload, files=files, headers=get_headers())
+                r = requests.post(f"{API_V2}/ai-assessments", data=payload, files=files, headers=get_headers())
                 
                 if r.status_code in [200, 202]:
                     data = r.json()
@@ -287,7 +287,7 @@ with tab_comp:
         
         with st.spinner("Calling V2 API (Comprehensive)..."):
             try:
-                r = requests.post(f"{API_V2}/generate", data=comp_payload, headers=get_headers())
+                r = requests.post(f"{API_V2}/ai-assessments", data=comp_payload, headers=get_headers())
                 if r.status_code in [200, 202]:
                     data = r.json()
                     st.session_state['current_job_id'] = data.get("job_id")
@@ -317,10 +317,8 @@ with tab_view:
             if not auth_token: st.error("Auth Token Required"); st.stop()
             
             try:
-                # V2 Status Check (Uses V2 GET typically, effectively same as V1 but we should use api/v2 prefix if exists? 
-                # Doc says Polling is V1 compatible. But api/v2/status exists? 
-                # Actually code implemented api_v2_router.get("/status/{job_id}")
-                r = requests.get(f"{API_V2}/status/{job_id}", headers=get_headers())
+                # GET /api/v2/ai-assessments/{job_id} — returns status and result when COMPLETED
+                r = requests.get(f"{API_V2}/ai-assessments/{job_id}", headers=get_headers())
                 if r.status_code == 200:
                     st.session_state['fetch_data'] = r.json()
                     st.success("Fetched!")
@@ -336,13 +334,26 @@ with tab_view:
         st.metric("Status", status)
         
         if status == "COMPLETED":
-            # Downloads
+            # Downloads — token sent in header, not URL query param
             st.markdown("### 📥 Downloads")
             d1, d2, d3 = st.columns(3)
-            # V2 CSV Link
-            d1.markdown(f"[**Download CSV (V2)**]({API_V2}/download_csv/{job_id}?token={auth_token})")
-            d2.markdown(f"[Download JSON]({API_V2}/download_json/{job_id}?token={auth_token})")
-            d3.markdown(f"[Download PDF]({API_V2}/download_pdf/{job_id}?token={auth_token})")
+            for fmt, col, label, mime in [
+                ("csv",  d1, "Download CSV",  "text/csv"),
+                ("json", d2, "Download JSON", "application/json"),
+                ("pdf",  d3, "Download PDF",  "application/pdf"),
+            ]:
+                try:
+                    dl_resp = requests.get(
+                        f"{API_V2}/ai-assessments/{job_id}/download",
+                        params={"format": fmt},
+                        headers=get_headers(),
+                    )
+                    if dl_resp.status_code == 200:
+                        col.download_button(label, dl_resp.content, file_name=f"assessment_{job_id}.{fmt}", mime=mime)
+                    else:
+                        col.error(f"{fmt.upper()} failed ({dl_resp.status_code})")
+                except Exception as e:
+                    col.error(f"{fmt.upper()} error: {e}")
 
             # EDITOR
             st.markdown("### ✏️ Interactive Editor")
@@ -425,17 +436,17 @@ with tab_view:
                             
                     new_questions_data[q_type] = new_q_list
                 
-                if st.form_submit_button("💾 Save Changes (PUT /api/v2)"):
+                if st.form_submit_button("💾 Save Changes (PUT /api/v2/ai-assessments/{job_id})"):
                     # Construct full payload
                     updated_assessment = raw_res.copy()
                     updated_assessment['questions'] = new_questions_data
-                    
+
                     update_payload = {"assessment_data": updated_assessment}
-                    
+
                     try:
                         r_upd = requests.put(
-                            f"{API_V2}/assessment/{job_id}", 
-                            json=update_payload, 
+                            f"{API_V2}/ai-assessments/{job_id}",
+                            json=update_payload,
                             headers=get_headers()
                         )
                         if r_upd.status_code == 200:
@@ -460,7 +471,7 @@ with tab_history:
         else:
             with st.spinner("Fetching history..."):
                 try:
-                    r_hist = requests.get(f"{API_V2}/history", headers=get_headers())
+                    r_hist = requests.get(f"{API_V2}/ai-assessments", headers=get_headers())
                     if r_hist.status_code == 200:
                         st.session_state['history_data'] = r_hist.json()
                     else:
@@ -505,8 +516,24 @@ with tab_history:
                             st.session_state['current_job_id'] = job_id
                             st.success(f"Job {job_id} loaded! Switch to 'View & Edit Result' tab.")
                         
-                        # Downloads
-                        st.markdown(f"[Download CSV]({API_V2}/download_csv/{job_id}?token={auth_token}) | [Download PDF]({API_V2}/download_pdf/{job_id}?token={auth_token})")
+                        # Downloads — token sent in header, not URL query param
+                        dl_col1, dl_col2 = st.columns(2)
+                        for fmt, col, label, mime in [
+                            ("csv", dl_col1, "CSV", "text/csv"),
+                            ("pdf", dl_col2, "PDF", "application/pdf"),
+                        ]:
+                            try:
+                                dl_r = requests.get(
+                                    f"{API_V2}/ai-assessments/{job_id}/download",
+                                    params={"format": fmt},
+                                    headers=get_headers(),
+                                )
+                                if dl_r.status_code == 200:
+                                    col.download_button(f"Download {label}", dl_r.content, file_name=f"assessment_{job_id}.{fmt}", mime=mime, key=f"dl_{fmt}_{job_id}")
+                                else:
+                                    col.error(f"{label} failed ({dl_r.status_code})")
+                            except Exception as e:
+                                col.error(f"{label} error: {e}")
                     else:
                         st.write(f"*Job is {status}* ‒ wait for completion.")
     elif history_items == []:
