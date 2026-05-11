@@ -12,7 +12,7 @@ Create a `.env` file and a `credentials.json` file in the project root.
 
 ### .env file:
 ```bash
-DB_DSN="postgresql://user:pass@db:5432/karmayogi_db"
+DATABASE_URL="postgresql://user:pass@db:5432/karmayogi_db"
 GOOGLE_PROJECT_ID="your-project-id"
 GOOGLE_LOCATION="us-central1"
 GENAI_MODEL_NAME="gemini-2.5-pro"

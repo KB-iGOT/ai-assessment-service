@@ -13,7 +13,7 @@ else:
     load_dotenv()
 
 # API Configuration
-KARMAYOGI_API_KEY = os.getenv("KARMAYOGI_API_KEY", "")
+KARMAYOGI_API_KEY = os.getenv("KARMAYOGI_API_KEY")  # Expected format: "Bearer <token>"
 KARMAYOGI_BASE_URL = os.getenv("KARMAYOGI_BASE_URL", "https://igotkarmayogi.gov.in")
 LEARNING_AI_BASE_URL = os.getenv("LEARNING_AI_BASE_URL", "https://learning-ai.prod.karmayogibharat.net")
 
@@ -30,7 +30,7 @@ REQUIRED_ROLE = os.getenv("REQUIRED_ROLE", "AI_ASSESSMENT_CREATOR")
 JWKS_URL = f"{SSO_URL}realms/{SSO_REALM}/protocol/openid-connect/certs" if SSO_URL and SSO_REALM else None
 
 # Database
-DB_DSN = os.getenv("DB_DSN", "postgresql://myuser:mypassword@localhost:5432/karmayogi_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://myuser:mypassword@localhost:5432/karmayogi_db")
 
 # Paths
 # Store data in the root directory's interactive_courses_data folder (or custom path)
@@ -44,13 +44,15 @@ GENAI_MODEL_NAME = os.getenv("GENAI_MODEL_NAME", "gemini-2.5-pro")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
 # Headers for Karmayogi API
+if not KARMAYOGI_API_KEY:
+    raise RuntimeError("Missing mandatory env var: KARMAYOGI_API_KEY")
+
 API_HEADERS = {
     'accept': 'application/json, text/plain, */*',
-    'authorization': f'Bearer {KARMAYOGI_API_KEY}' if KARMAYOGI_API_KEY else '',
+    'authorization': KARMAYOGI_API_KEY,
     'org': 'dopt',
     'rootorg': 'igot',
     'locale': 'en',
-    # 'hostpath': 'portal.uat.karmayogibharat.net' # Optional based on JS
 }
 
 # Load Prompt Version
