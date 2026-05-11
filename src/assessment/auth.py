@@ -2,7 +2,7 @@
 import logging
 import jwt
 from typing import Optional, Dict, Any
-from fastapi import Request, HTTPException, Security
+from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 from .config import JWKS_URL, SSO_URL, SSO_REALM, REQUIRED_ROLE
 
@@ -125,13 +125,8 @@ async def validate_token(token: str) -> Dict[str, Any]:
         logger.error(f"Token validation failed: {e}")
         raise HTTPException(status_code=401, detail="Authentication failed")
 
-async def get_current_user(request: Request, token: str = Security(api_key_header)) -> str:
+async def get_current_user(token: str = Security(api_key_header)) -> str:
     if not token:
-        token = request.query_params.get("token")
-        
-    if not token:
-        # TODO: Decide if we want to allow anonymous access (return None) or enforce auth.
-        # For /api/v2/generate, we enforce it.
         raise HTTPException(status_code=401, detail="Missing authentication token")
     
     # DEV OVERRIDE (For Local Testing)
