@@ -1,0 +1,377 @@
+{
+  "info": {
+    "_postman_id": "e16ce47c-55ad-4bac-9455-820a6fcaaea1",
+    "name": "iGOT AI Assessments",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "AI Assessment Generation Service\n\n**Environments:**\n- Local (direct):  set `base_url` = `http://localhost:8000/ai-assessments/v1`\n- UAT via Kong:    set `base_url` = `https://portal.uat.karmayogibharat.net/api/ai/assessments/v1`\n\n**Variables to set:**\n- `base_url`      \u2014 full base URL including version prefix (see above)\n- `auth_token`    \u2014 Keycloak JWT from iGot (x-authenticated-user-token)\n- `kong_api_key`  \u2014 Kong JWT credential (Authorization: bearer)\n- `job_id`        \u2014 paste Job ID returned from Generate to use in Status / Update / Download"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://portal.uat.karmayogibharat.net/api/ai/assessments/v1",
+      "description": "Full base URL including version. Local: http://localhost:8000/ai-assessments/v1 | UAT: https://portal.uat.karmayogibharat.net/api/ai/assessments/v1"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "description": "Paste your x-authenticated-user-token JWT here (Keycloak Bearer token)"
+    },
+    {
+      "key": "kong_api_key",
+      "value": "",
+      "description": "Kong JWT credential \u2014 goes in Authorization: bearer header"
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "description": "Job ID returned from the Generate request \u2014 paste it here to use in Status / Update / Download"
+    }
+  ],
+  "item": [
+    {
+      "name": "Generate Assessment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "type": "text",
+              "key": "course_ids",
+              "value": "do_1144540583527301121908",
+              "description": "Comma-separated course IDs"
+            },
+            {
+              "type": "text",
+              "key": "assessment_type",
+              "value": "practice",
+              "description": "practice | final | comprehensive | standalone"
+            },
+            {
+              "type": "text",
+              "key": "difficulty",
+              "value": "intermediate",
+              "description": "beginner | intermediate | advanced"
+            },
+            {
+              "type": "text",
+              "key": "language",
+              "value": "english"
+            },
+            {
+              "type": "text",
+              "key": "total_questions",
+              "value": "10"
+            },
+            {
+              "type": "text",
+              "key": "question_type_counts",
+              "value": "{\"mcq\":5,\"ftb\":5,\"mtf\":0,\"multichoice\":0,\"truefalse\":0}"
+            },
+            {
+              "type": "text",
+              "key": "enable_blooms",
+              "value": "true"
+            },
+            {
+              "type": "text",
+              "key": "blooms_config",
+              "value": "{\"Remember\":20,\"Understand\":30,\"Apply\":30,\"Analyze\":10,\"Evaluate\":10,\"Create\":0}"
+            },
+            {
+              "type": "text",
+              "key": "force",
+              "value": "false",
+              "description": "true = bypass cache and regenerate"
+            },
+            {
+              "type": "text",
+              "key": "time_limit",
+              "value": "0",
+              "description": "Minutes \u2014 0 means no limit"
+            },
+            {
+              "type": "text",
+              "key": "topic_names",
+              "value": "",
+              "description": "Optional comma-separated topics"
+            },
+            {
+              "type": "text",
+              "key": "course_weightage",
+              "value": "",
+              "description": "Comprehensive only \u2014 JSON e.g. {\"do_1\":60,\"do_2\":40}"
+            },
+            {
+              "type": "text",
+              "key": "additional_instructions",
+              "value": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/generate",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "generate"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/status/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "status",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update Assessment",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"assessment_data\": {}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/update/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "update",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/history",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "history"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (CSV)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=csv",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "csv"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (JSON)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=json",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (PDF)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=pdf",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "pdf"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (DOCX)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=docx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "docx"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/health",
+          "host": [
+            "localhost:8000"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
