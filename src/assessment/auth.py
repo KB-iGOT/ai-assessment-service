@@ -100,7 +100,7 @@ async def validate_token(token: str) -> Dict[str, Any]:
             token,
             public_key,
             algorithms=["RS256"],
-            options={"require": ["exp", "sub"]}
+            options={"require": ["exp", "sub"], "verify_aud": False}
         )
 
         if not check_iss(payload.get("iss", "")):
