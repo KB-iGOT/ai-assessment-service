@@ -265,6 +265,8 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
     "status": "COMPLETED",
     "created_at": "2026-05-08T17:04:31.793723",
     "updated_at": "2026-05-08T20:38:12.732428",
+    "course_ids": ["do_113948972799877120197"],
+    "course_names": ["Foundations of Public Policy"],
     "config": {
       "language": "english",
       "difficulty": "beginner",
@@ -293,6 +295,8 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 | `status` | `PENDING`, `IN_PROGRESS`, `COMPLETED`, or `FAILED` |
 | `created_at` | ISO 8601 timestamp when the job was first created |
 | `updated_at` | ISO 8601 timestamp of the last status change |
+| `course_ids` | List of iGOT course IDs the assessment was generated from. |
+| `course_names` | List of course names corresponding to `course_ids`. Multiple entries for comprehensive assessments. |
 | `config` | The parameters used when this assessment was generated (language, difficulty, types, etc.) |
 | `error_message` | `null` on success. Error detail if `status` is `FAILED`. |
 

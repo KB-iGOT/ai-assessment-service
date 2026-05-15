@@ -153,10 +153,9 @@ def generate_html_content(assessment_data: dict) -> str:
             q_html += f"""
                 <div class="reasoning-box">
                     <b>Learning Objective:</b> {rs.get('learning_objective_alignment', 'N/A')}<br/>
-                    <b>Explanation:</b> {ar.get('correct_answer_explanation', 'N/A')}<br/>
+                    <b>Rationale:</b> {ar.get('correct_answer_explanation', 'N/A')}<br/>
                     <b>Why Factor:</b> {ar.get('why_factor', 'N/A')}<br/>
-                    <b>Logic:</b> {ar.get('logic_justification', 'N/A')}<br/><br/>
-                    <b>Rationale:</b> {rs.get('question_type_rationale', 'N/A')}<br/>
+                    <b>Logic:</b> {ar.get('logic_justification', 'N/A')}<br/>
                     <b>Bloom's Level:</b> {q.get('blooms_level', 'N/A')} ({rs.get('blooms_level_justification', 'N/A')})<br/>
                     <b>Competency:</b> {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}<br/>
                     <b>Relevance:</b> {q.get('relevance_percentage', 'N/A')}%
@@ -259,10 +258,9 @@ def generate_docx(assessment_data: dict, output_path: Path):
             
             r_para = doc.add_paragraph()
             r_para.add_run(f"\nLearning Objective: {reasoning.get('learning_objective_alignment', 'N/A')}\n").italic = True
-            r_para.add_run(f"Explanation: {ar.get('correct_answer_explanation', 'N/A')}\n").italic = True
+            r_para.add_run(f"Rationale: {ar.get('correct_answer_explanation', 'N/A')}\n").italic = True
             r_para.add_run(f"Why Factor: {ar.get('why_factor', 'N/A')}\n").italic = True
-            r_para.add_run(f"Logic: {ar.get('logic_justification', 'N/A')}\n\n").italic = True
-            r_para.add_run(f"Rationale: {reasoning.get('question_type_rationale', 'N/A')}\n").italic = True
+            r_para.add_run(f"Logic: {ar.get('logic_justification', 'N/A')}\n").italic = True
             r_para.add_run(f"Bloom's: {q.get('blooms_level', 'N/A')} ({reasoning.get('blooms_level_justification', 'N/A')}) | Relevance: {q.get('relevance_percentage', 'N/A')}%\n")
             r_para.add_run(f"Competency: {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}")
             
