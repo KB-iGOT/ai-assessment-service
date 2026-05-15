@@ -146,7 +146,7 @@ async def update_job_result(job_id: str, user_id: str, new_assessment_data: dict
 async def get_user_assessments_history(user_id: str) -> List[Dict[str, Any]]:
     async with get_pool().acquire() as conn:
         rows = await conn.fetch("""
-            SELECT course_id as job_id, status, created_at, updated_at, metadata, error_message
+            SELECT course_id as job_id, status, created_at, updated_at, metadata, assessment_data, error_message
             FROM interactive_assessments
             WHERE user_id = $1
             ORDER BY updated_at DESC

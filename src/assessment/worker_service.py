@@ -76,6 +76,7 @@ async def process_job(payload: Dict[str, Any]):
         )
         
         # Inject API Configuration into Metadata
+        metadata['course_ids'] = course_ids
         metadata['config'] = {
             "assessment_type": payload.get('assessment_type'),
             "difficulty": payload.get('difficulty'),

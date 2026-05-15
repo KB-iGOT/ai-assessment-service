@@ -396,12 +396,21 @@ async def get_history_v1(user_id: str = Depends(get_current_user)):
     formatted_history = []
     for item in history:
         meta = item.get("metadata") or {}
-        
+        assessment_data = item.get("assessment_data") or {}
+        if isinstance(assessment_data, str):
+            try:
+                assessment_data = json.loads(assessment_data)
+            except Exception:
+                assessment_data = {}
+        course_names = assessment_data.get("blueprint", {}).get("courses_covered", [])
+
         formatted_history.append({
             "job_id": item.get("job_id"),
             "status": item.get("status"),
             "created_at": item.get("created_at").isoformat() if item.get("created_at") else None,
             "updated_at": item.get("updated_at").isoformat() if item.get("updated_at") else None,
+            "course_ids": meta.get("course_ids", []),
+            "course_names": course_names,
             "config": meta.get("config", {}),
             "error_message": item.get("error_message")
         })

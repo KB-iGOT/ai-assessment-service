@@ -155,23 +155,21 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
 
         # Add Rationale (answer_rationale)
         rationale = q.get("answer_rationale", {})
-        row["Explanation"] = rationale.get("correct_answer_explanation", "")
+        row["Rationale"] = rationale.get("correct_answer_explanation", "")
         row["Why Factor"] = rationale.get("why_factor", "")
         row["Logic Justification"] = rationale.get("logic_justification", "")
-        
+
         # Add Reasoning (reasoning context)
         reasoning = q.get("reasoning", {})
         kcm = reasoning.get("competency_alignment", {}).get("kcm", {})
-        
+
         row["Bloom's Level"] = q.get("blooms_level", "")
         row["Relevance %"] = q.get("relevance_percentage", "")
-        
+
         competency_str = ""
         if kcm.get("competency_area") and kcm.get("competency_theme"):
             competency_str = f"{kcm.get('competency_area')} - {kcm.get('competency_theme')}"
         row["Competency"] = competency_str
-        
-        row["Rationale"] = reasoning.get("question_type_rationale", "")
 
         rows.append(row)
         q_counter += 1
