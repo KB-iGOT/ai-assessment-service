@@ -120,6 +120,7 @@ with tab_gen:
             st.stop()
             
         # Construct Payload
+        course_weightage = None
         q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "multichoice": multi, "truefalse": tf}
         
         payload = {
@@ -136,7 +137,7 @@ with tab_gen:
         if enable_blooms and blooms_config:
             payload['blooms_config'] = json.dumps(blooms_config)
         
-        if course_weightage.strip():
+        if course_weightage and course_weightage.strip():
             payload['course_weightage'] = course_weightage.strip()
         
         if time_limit > 0:
@@ -487,23 +488,38 @@ with tab_history:
             status = item.get("status", "Unknown")
             updated = item.get("updated_at", "Unknown")
             config = item.get("config", {})
-            
+            course_names = item.get("course_names", [])
+            course_ids_list = item.get("course_ids", [])
+            course_label = ", ".join(course_names) if course_names else "Unknown Course"
+
             # Status badge logic
             status_emoji = "⏳"
             if status == "COMPLETED": status_emoji = "✅"
             elif status == "FAILED": status_emoji = "❌"
             elif status == "PENDING": status_emoji = "🕒"
-            
-            with st.expander(f"{status_emoji} Job: {job_id} | Updated: {updated[:10]}", expanded=(idx == 0)):
+
+            with st.expander(f"{status_emoji} {course_label} | Updated: {updated[:10]}", expanded=(idx == 0)):
                 cols = st.columns([2, 1])
-                
+
                 with cols[0]:
-                    st.markdown("**Configuration Used:**")
+                    st.write(f"- **Job ID:** `{job_id}`")
+                    if course_names:
+                        st.write(f"- **Course(s):** {', '.join(course_names)}")
+                    if course_ids_list:
+                        st.write(f"- **Course ID(s):** {', '.join(course_ids_list)}")
+                    st.write(f"- **Created:** {item.get('created_at', 'N/A')[:19].replace('T', ' ')}")
+                    st.write(f"- **Updated:** {updated[:19].replace('T', ' ')}")
+                    st.markdown("**Configuration:**")
                     if config:
                         st.write(f"- **Type:** {config.get('assessment_type', 'N/A')}")
                         st.write(f"- **Difficulty:** {config.get('difficulty', 'N/A')}")
                         st.write(f"- **Language:** {config.get('language', 'N/A')}")
                         st.write(f"- **Total Questions:** {config.get('total_questions', 'N/A')}")
+                        q_counts = config.get('question_type_counts', {})
+                        if q_counts:
+                            active = ", ".join(f"{k.upper()}:{v}" for k, v in q_counts.items() if v > 0)
+                            st.write(f"- **Question Types:** {active}")
+                        st.write(f"- **Time Limit:** {config.get('time_limit', 0) or 'No limit'}")
                         if config.get('course_weightage'):
                             st.write(f"- **Course Weightage:** `{config.get('course_weightage')}`")
                     else:

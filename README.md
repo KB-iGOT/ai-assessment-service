@@ -200,7 +200,7 @@ The API is the production-ready, event-driven iteration. It introduces **Authent
 ### 4. Fetch User History
 - **Endpoint**: `GET /ai-assessments/history`
 - **Description**: Returns all assessment jobs (any status) initiated by the authenticated user.
-- **Response**: Array of `{job_id, status, created_at, updated_at, config, error_message}`.
+- **Response**: Array of `{job_id, status, created_at, updated_at, course_ids, course_names, config, error_message}`.
 
 ### 5. Download Results
 - **Endpoint**: `GET /ai-assessments/download/{job_id}?format=<format>`
@@ -311,7 +311,7 @@ Arrays keyed by question type: `Multiple Choice Question`, `FTB Question`, `MTF 
 
 Every question object includes:
 - `course_name` — source course (important for comprehensive assessments)
-- `answer_rationale` — `correct_answer_explanation`, `why_factor`, `logic_justification`
+- `answer_rationale` — `correct_answer_explanation` (labelled **Rationale** in exports), `why_factor`, `logic_justification`
 - `reasoning`:
   - `learning_objective_alignment` — verbatim match to a blueprint learning objective
   - `competency_alignment` — KCM area, theme, sub-theme, and domain
@@ -390,11 +390,13 @@ curl --location 'http://localhost:8000/ai-assessments/v1/history' \
 ```json
 [
   {
-    "job_id": "comprehensive_do_courseA123_do_courseB456",
+    "job_id": "do_113948972799877120197_7fa321bd_1e8b6826-3326-4175-b202-f5f5971f457a",
     "status": "COMPLETED",
-    "created_at": "2026-03-10T11:45:00.000Z",
-    "updated_at": "2026-03-10T11:46:15.000Z",
-    "config": { "assessment_type": "comprehensive", "difficulty": "advanced", "total_questions": 20 },
+    "created_at": "2026-05-08T17:04:31.793723",
+    "updated_at": "2026-05-08T20:38:12.732428",
+    "course_ids": ["do_113948972799877120197"],
+    "course_names": ["Foundations of Public Policy"],
+    "config": { "assessment_type": "practice", "difficulty": "intermediate", "total_questions": 10 },
     "error_message": null
   }
 ]

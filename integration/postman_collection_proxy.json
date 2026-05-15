@@ -1,0 +1,372 @@
+{
+  "info": {
+    "_postman_id": "b3f2a1d4-8c9e-4f2a-b1c3-7d0e5f4a9b2c",
+    "name": "iGOT AI Assessments (UI Proxy)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "AI Assessment Generation Service — accessed via UI Proxy (cookie-based auth, no API keys)\n\n**Environments:**\n- UAT via UI Proxy: set `base_url` = `https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/assessments/v1`\n\n**Variables to set:**\n- `base_url`   — full base URL including version prefix (see above)\n- `cookie`     — session cookie from browser (connect.sid=...)\n- `job_id`     — paste Job ID returned from Generate to use in Status / Update / Download"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/assessments/v1",
+      "description": "Full base URL including version. UAT: https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/assessments/v1"
+    },
+    {
+      "key": "cookie",
+      "value": "",
+      "description": "Session cookie from browser — e.g. connect.sid=s%3A..."
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "description": "Job ID returned from the Generate request — paste it here to use in Status / Update / Download"
+    }
+  ],
+  "item": [
+    {
+      "name": "Generate Assessment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "type": "text",
+              "key": "course_ids",
+              "value": "do_1144540583527301121908",
+              "description": "Comma-separated course IDs"
+            },
+            {
+              "type": "text",
+              "key": "assessment_type",
+              "value": "practice",
+              "description": "practice | final | comprehensive | standalone"
+            },
+            {
+              "type": "text",
+              "key": "difficulty",
+              "value": "intermediate",
+              "description": "beginner | intermediate | advanced"
+            },
+            {
+              "type": "text",
+              "key": "language",
+              "value": "english"
+            },
+            {
+              "type": "text",
+              "key": "total_questions",
+              "value": "10"
+            },
+            {
+              "type": "text",
+              "key": "question_type_counts",
+              "value": "{\"mcq\":5,\"ftb\":5,\"mtf\":0,\"multichoice\":0,\"truefalse\":0}"
+            },
+            {
+              "type": "text",
+              "key": "enable_blooms",
+              "value": "true"
+            },
+            {
+              "type": "text",
+              "key": "blooms_config",
+              "value": "{\"Remember\":20,\"Understand\":30,\"Apply\":30,\"Analyze\":10,\"Evaluate\":10,\"Create\":0}"
+            },
+            {
+              "type": "text",
+              "key": "force",
+              "value": "false",
+              "description": "true = bypass cache and regenerate"
+            },
+            {
+              "type": "text",
+              "key": "time_limit",
+              "value": "0",
+              "description": "Minutes — 0 means no limit"
+            },
+            {
+              "type": "text",
+              "key": "topic_names",
+              "value": "",
+              "description": "Optional comma-separated topics"
+            },
+            {
+              "type": "text",
+              "key": "course_weightage",
+              "value": "",
+              "description": "Comprehensive only — JSON e.g. {\"do_1\":60,\"do_2\":40}"
+            },
+            {
+              "type": "text",
+              "key": "additional_instructions",
+              "value": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/generate",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "generate"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/status/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "status",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update Assessment",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"assessment_data\": {}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/update/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "update",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get History",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/history",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "history"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (CSV)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=csv",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "csv"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (JSON)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=json",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "json"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (PDF)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=pdf",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "pdf"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download (DOCX)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "accept",
+            "value": "application/json"
+          },
+          {
+            "key": "cookie",
+            "value": "{{cookie}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/download/{{job_id}}?format=docx",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "download",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "docx"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/health",
+          "host": [
+            "localhost:8000"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

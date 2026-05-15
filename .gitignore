@@ -55,5 +55,3 @@ docker-compose
 #HTML
 pdf_video_meta.html
 
-# Postman
-postman_collection.json
