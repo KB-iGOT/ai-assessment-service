@@ -185,6 +185,7 @@ The API is the production-ready, event-driven iteration. It introduces **Authent
 | `enable_blooms` | Boolean String | `"true"` enforces Bloom's Taxonomy distribution |
 | `blooms_config` | JSON String | Bloom's % per level — must sum to 100: `{"Remember": 20, "Understand": 20, "Apply": 20, "Analyze": 20, "Evaluate": 10, "Create": 10}` |
 | `course_weightage` | JSON String | Comprehensive only — % per course ID, must sum to 100: `{"do_1": 60, "do_2": 40}` |
+| `course_names` | String | Optional — comma-separated names matching `course_ids` order. Populates history immediately without waiting for job completion. |
 | `time_limit` | Integer | Duration in minutes — shifts cognitive level distribution |
 | `files` | File | PDF or VTT files for standalone assessments |
 

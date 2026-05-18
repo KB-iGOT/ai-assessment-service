@@ -138,6 +138,7 @@ async def generate_v1(
     ),
     enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
     course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
+    course_names: Optional[str] = Form(None, description="Comma-separated course names matching the order of course_ids"),
     additional_instructions: Optional[str] = Form(""),
     files: Optional[List[Union[UploadFile, str]]] = File(None)
 ):
@@ -254,8 +255,12 @@ async def generate_v1(
             }
 
     # --- 4. Start New Job ---
-    # Store with User Specific ID
-    await create_job(user_job_id, user_id=user_id)
+    parsed_course_names = [n.strip() for n in course_names.split(",")] if course_names else []
+    initial_metadata = {
+        "course_ids": c_ids,
+        "course_names": parsed_course_names,
+    }
+    await create_job(user_job_id, user_id=user_id, metadata=initial_metadata)
     
     saved_files = []
     if files:
@@ -392,17 +397,14 @@ async def get_history_v1(user_id: str = Depends(get_current_user)):
     """
     history = await get_user_assessments_history(user_id)
     
-    # Clean up metadata string output
     formatted_history = []
     for item in history:
         meta = item.get("metadata") or {}
-        assessment_data = item.get("assessment_data") or {}
-        if isinstance(assessment_data, str):
+        if isinstance(meta, str):
             try:
-                assessment_data = json.loads(assessment_data)
+                meta = json.loads(meta)
             except Exception:
-                assessment_data = {}
-        course_names = assessment_data.get("blueprint", {}).get("courses_covered", [])
+                meta = {}
 
         formatted_history.append({
             "job_id": item.get("job_id"),
@@ -410,7 +412,7 @@ async def get_history_v1(user_id: str = Depends(get_current_user)):
             "created_at": item.get("created_at").isoformat() if item.get("created_at") else None,
             "updated_at": item.get("updated_at").isoformat() if item.get("updated_at") else None,
             "course_ids": meta.get("course_ids", []),
-            "course_names": course_names,
+            "course_names": meta.get("course_names", []),
             "config": meta.get("config", {}),
             "error_message": item.get("error_message")
         })

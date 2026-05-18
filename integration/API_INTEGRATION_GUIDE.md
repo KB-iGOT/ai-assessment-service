@@ -107,6 +107,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 | `time_limit` | integer | No | `0` or any positive integer | Time limit in minutes. `0` means no limit. |
 | `topic_names` | string | No | Comma-separated topic names | Restrict question generation to specific topics within the course. Leave blank to use all topics. |
 | `course_weightage` | JSON string | No | `{"<course_id>": <percent>, ...}` | Weightage per course when `assessment_type` is `comprehensive`. Values must sum to 100. Example: `{"do_1":60,"do_2":40}` |
+| `course_names` | string | No | Comma-separated course names | Names matching the order of `course_ids`. Used to populate history immediately without waiting for job completion. Example: `"Foundations of Public Policy,Ethics in Governance"` |
 | `additional_instructions` | string | No | Free text | Any extra instructions passed to the AI model (e.g. "focus on case studies", "avoid numerical questions"). |
 | `force` | boolean | No | `true`, `false` | `true` bypasses cache and forces a fresh generation. Default: `false`. |
 
