@@ -75,8 +75,18 @@ async def process_job(payload: Dict[str, Any]):
             extra_files=extra_files
         )
         
+        # Preserve course_names saved at job creation time
+        existing = await get_assessment_status(job_id)
+        existing_meta = existing.get("metadata") or {} if existing else {}
+        if isinstance(existing_meta, str):
+            try:
+                existing_meta = json.loads(existing_meta)
+            except Exception:
+                existing_meta = {}
+
         # Inject API Configuration into Metadata
         metadata['course_ids'] = course_ids
+        metadata['course_names'] = existing_meta.get('course_names', [])
         metadata['config'] = {
             "assessment_type": payload.get('assessment_type'),
             "difficulty": payload.get('difficulty'),

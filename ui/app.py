@@ -185,26 +185,28 @@ with tab_comp:
     
     # Dynamic Course Inputs
     if "comp_courses" not in st.session_state:
-        st.session_state.comp_courses = [{"id": "", "weight": 50}, {"id": "", "weight": 50}]
-        
+        st.session_state.comp_courses = [{"id": "", "name": "", "weight": 50}, {"id": "", "name": "", "weight": 50}]
+
     st.markdown("#### Input Courses & Weights")
-    
+
     course_data = []
     total_weight = 0
     for i, course in enumerate(st.session_state.comp_courses):
-        col1, col2, col3 = st.columns([5, 2, 1])
+        col1, col2, col3, col4 = st.columns([4, 4, 2, 1])
         with col1:
             c_id = st.text_input(f"Course ID {i+1}", value=course["id"], key=f"cid_{i}")
         with col2:
-            c_w = st.number_input(f"Weight (%)", min_value=1, max_value=100, value=course["weight"], key=f"cw_{i}")
+            c_name = st.text_input(f"Course Name {i+1}", value=course.get("name", ""), placeholder="e.g. Ethics in Governance", key=f"cname_{i}")
         with col3:
-            st.write("") # Spacing
+            c_w = st.number_input(f"Weight (%)", min_value=1, max_value=100, value=course["weight"], key=f"cw_{i}")
+        with col4:
+            st.write("")
             st.write("")
             if st.button("🗑️", key=f"del_{i}"):
                 st.session_state.comp_courses.pop(i)
                 st.rerun()
-                
-        course_data.append({"id": c_id, "weight": c_w})
+
+        course_data.append({"id": c_id, "name": c_name, "weight": c_w})
         total_weight += c_w
         
     if st.button("➕ Add Another Course"):
@@ -273,12 +275,13 @@ with tab_comp:
             st.stop()
             
         c_ids = [c["id"].strip() for c in valid_courses]
+        c_names = [c.get("name", "").strip() for c in valid_courses]
         c_weights = {c["id"].strip(): c["weight"] for c in valid_courses}
-        
+
         comp_q_counts = {"mcq": cmcq, "ftb": cftb, "mtf": cmtf, "multichoice": cmulti, "truefalse": ctf}
         comp_payload = {
             'course_ids': ",".join(c_ids),
-            'force': 'true' if force_new else 'false', 
+            'force': 'true' if force_new else 'false',
             'assessment_type': 'comprehensive',
             'difficulty': comp_diff,
             'total_questions': total_q,
@@ -287,6 +290,8 @@ with tab_comp:
             'enable_blooms': 'true' if comp_enable_blooms else 'false',
             'course_weightage': json.dumps(c_weights)
         }
+        if any(c_names):
+            comp_payload['course_names'] = ",".join(c_names)
         
         if comp_enable_blooms and comp_blooms_config:
             comp_payload['blooms_config'] = json.dumps(comp_blooms_config)

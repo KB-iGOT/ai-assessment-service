@@ -332,6 +332,7 @@ Every question object includes:
 curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_1144540583527301121908"' \
+--form 'course_names="Foundations of Public Policy"' \
 --form 'assessment_type="practice"' \
 --form 'difficulty="intermediate"' \
 --form 'language="english"' \
@@ -348,6 +349,7 @@ curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
 curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
 --header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_courseA123,do_courseB456"' \
+--form 'course_names="Ethics in Governance,Foundations of Public Policy"' \
 --form 'assessment_type="comprehensive"' \
 --form 'difficulty="advanced"' \
 --form 'language="english"' \
