@@ -81,7 +81,6 @@ async def get_assessment_status(course_id: str) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 async def create_job(course_id: str, user_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None):
-    import json as _json
     async with get_pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute("""
@@ -89,7 +88,7 @@ async def create_job(course_id: str, user_id: Optional[str] = None, metadata: Op
                 VALUES ($1, $2, 'PENDING', $3, NOW())
                 ON CONFLICT (course_id) DO UPDATE
                 SET status = 'PENDING', user_id = EXCLUDED.user_id, metadata = EXCLUDED.metadata, updated_at = NOW(), error_message = NULL
-            """, course_id, user_id, _json.dumps(metadata) if metadata else None)
+            """, course_id, user_id, json.dumps(metadata) if metadata else None)
 
 async def update_job_status(course_id: str, status: str, error: str | None = None):
     async with get_pool().acquire() as conn:
