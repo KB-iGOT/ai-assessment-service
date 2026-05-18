@@ -109,6 +109,12 @@
             },
             {
               "type": "text",
+              "key": "course_names",
+              "value": "",
+              "description": "Optional — comma-separated course names matching the order of course_ids e.g. \"Course A,Course B\""
+            },
+            {
+              "type": "text",
               "key": "additional_instructions",
               "value": ""
             }

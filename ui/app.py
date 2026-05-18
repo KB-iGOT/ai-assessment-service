@@ -52,8 +52,10 @@ with tab_gen:
             st.info("Upload-only mode active. Please upload files below.")
             course_id = ""
             course_ids_input = ""
+            course_names_input = ""
         else:
             course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...")
+            course_names_input = st.text_input("Course Names (comma-separated)", placeholder="Foundations of Public Policy, Ethics in Governance", help="Optional — used to show course names in history immediately")
 
     # Config Form
     with st.expander("Detailed Configuration", expanded=True):
@@ -139,6 +141,9 @@ with tab_gen:
         
         if course_weightage and course_weightage.strip():
             payload['course_weightage'] = course_weightage.strip()
+
+        if course_names_input and course_names_input.strip():
+            payload['course_names'] = course_names_input.strip()
         
         if time_limit > 0:
             payload['time_limit'] = time_limit

@@ -80,15 +80,16 @@ async def get_assessment_status(course_id: str) -> Optional[Dict[str, Any]]:
         )
         return dict(row) if row else None
 
-async def create_job(course_id: str, user_id: Optional[str] = None):
+async def create_job(course_id: str, user_id: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None):
+    import json as _json
     async with get_pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute("""
-                INSERT INTO interactive_assessments (course_id, user_id, status, updated_at)
-                VALUES ($1, $2, 'PENDING', NOW())
+                INSERT INTO interactive_assessments (course_id, user_id, status, metadata, updated_at)
+                VALUES ($1, $2, 'PENDING', $3, NOW())
                 ON CONFLICT (course_id) DO UPDATE
-                SET status = 'PENDING', user_id = EXCLUDED.user_id, updated_at = NOW(), error_message = NULL
-            """, course_id, user_id)
+                SET status = 'PENDING', user_id = EXCLUDED.user_id, metadata = EXCLUDED.metadata, updated_at = NOW(), error_message = NULL
+            """, course_id, user_id, _json.dumps(metadata) if metadata else None)
 
 async def update_job_status(course_id: str, status: str, error: str | None = None):
     async with get_pool().acquire() as conn:
@@ -146,7 +147,7 @@ async def update_job_result(job_id: str, user_id: str, new_assessment_data: dict
 async def get_user_assessments_history(user_id: str) -> List[Dict[str, Any]]:
     async with get_pool().acquire() as conn:
         rows = await conn.fetch("""
-            SELECT course_id as job_id, status, created_at, updated_at, metadata, assessment_data, error_message
+            SELECT course_id as job_id, status, created_at, updated_at, metadata, error_message
             FROM interactive_assessments
             WHERE user_id = $1
             ORDER BY updated_at DESC
