@@ -259,6 +259,15 @@ async def generate_v1(
     initial_metadata = {
         "course_ids": c_ids,
         "course_names": parsed_course_names,
+        "config": {
+            "assessment_type": assessment_type,
+            "difficulty": difficulty,
+            "total_questions": total_questions,
+            "question_type_counts": q_counts,
+            "language": language,
+            "time_limit": time_limit,
+            "course_weightage": course_weightage,
+        }
     }
     await create_job(user_job_id, user_id=user_id, metadata=initial_metadata)
     
