@@ -1,5 +1,6 @@
 
 import csv
+import re
 from typing import Dict, List, Any
 from pathlib import Path
 
@@ -52,10 +53,14 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
             context = q.get("matching_context", "Match the following items appropriately:")
             default_q_txt = f"{context}\n\n" if context else "Match the following items appropriately:\n\n"
         
+        q_text = q.get("question_text", default_q_txt)
+        if q_type == "FTB":
+            q_text = re.sub(r'_{2,}', '<blank>', q_text)
+
         row = {
             "QuestionNo": q_counter,
             "QuestionType": q_type,
-            "Question": q.get("question_text", f"{default_q_txt}"),
+            "Question": q_text,
             "QuestionTagging": tagging,
         }
         
