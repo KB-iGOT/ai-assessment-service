@@ -347,11 +347,12 @@ with tab_view:
         if status == "COMPLETED":
             # Downloads — token sent in header, not URL query param
             st.markdown("### 📥 Downloads")
-            d1, d2, d3 = st.columns(3)
+            d1, d2, d3, d4 = st.columns(4)
             for fmt, col, label, mime in [
-                ("csv",  d1, "Download CSV",  "text/csv"),
-                ("json", d2, "Download JSON", "application/json"),
-                ("pdf",  d3, "Download PDF",  "application/pdf"),
+                ("csv",       d1, "Download CSV",       "text/csv"),
+                ("csv_basic", d2, "Download CSV Basic", "text/csv"),
+                ("json",      d3, "Download JSON",      "application/json"),
+                ("pdf",       d4, "Download PDF",       "application/pdf"),
             ]:
                 try:
                     dl_resp = requests.get(
@@ -360,7 +361,8 @@ with tab_view:
                         headers=get_headers(),
                     )
                     if dl_resp.status_code == 200:
-                        col.download_button(label, dl_resp.content, file_name=f"assessment_{job_id}.{fmt}", mime=mime)
+                        ext = "csv" if fmt == "csv_basic" else fmt
+                        col.download_button(label, dl_resp.content, file_name=f"assessment_{job_id}_{fmt}.{ext}", mime=mime)
                     else:
                         col.error(f"{fmt.upper()} failed ({dl_resp.status_code})")
                 except Exception as e:
@@ -543,10 +545,11 @@ with tab_history:
                             st.success(f"Job {job_id} loaded! Switch to 'View & Edit Result' tab.")
                         
                         # Downloads — token sent in header, not URL query param
-                        dl_col1, dl_col2 = st.columns(2)
+                        dl_col1, dl_col2, dl_col3 = st.columns(3)
                         for fmt, col, label, mime in [
-                            ("csv", dl_col1, "CSV", "text/csv"),
-                            ("pdf", dl_col2, "PDF", "application/pdf"),
+                            ("csv",       dl_col1, "CSV",       "text/csv"),
+                            ("csv_basic", dl_col2, "CSV Basic", "text/csv"),
+                            ("pdf",       dl_col3, "PDF",       "application/pdf"),
                         ]:
                             try:
                                 dl_r = requests.get(
@@ -555,7 +558,8 @@ with tab_history:
                                     headers=get_headers(),
                                 )
                                 if dl_r.status_code == 200:
-                                    col.download_button(f"Download {label}", dl_r.content, file_name=f"assessment_{job_id}.{fmt}", mime=mime, key=f"dl_{fmt}_{job_id}")
+                                    ext = "csv" if fmt == "csv_basic" else fmt
+                                    col.download_button(f"Download {label}", dl_r.content, file_name=f"assessment_{job_id}_{fmt}.{ext}", mime=mime, key=f"dl_{fmt}_{job_id}")
                                 else:
                                     col.error(f"{label} failed ({dl_r.status_code})")
                             except Exception as e:

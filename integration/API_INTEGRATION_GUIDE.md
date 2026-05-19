@@ -312,11 +312,17 @@ Downloads a completed assessment in the requested file format. Only available wh
 #### Kong
 
 ```bash
-# CSV
+# CSV (full — with QuestionTagging, all question types)
 curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/download/<job_id>?format=csv' \
   --header 'x-authenticated-user-token: <keycloak_jwt>' \
   --header 'Authorization: bearer <kong_jwt_credential>' \
   --output assessment.csv
+
+# CSV Basic (no True/False questions, no QuestionTagging column)
+curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/download/<job_id>?format=csv_basic' \
+  --header 'x-authenticated-user-token: <keycloak_jwt>' \
+  --header 'Authorization: bearer <kong_jwt_credential>' \
+  --output assessment_basic.csv
 
 # JSON
 curl ... ?format=json --output assessment.json
@@ -340,7 +346,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 
 | Parameter | Required | Accepted Values | Description |
 |---|---|---|---|
-| `format` | Yes | `csv`, `json`, `pdf`, `docx` | Output file format |
+| `format` | Yes | `csv`, `csv_basic`, `json`, `pdf`, `docx` | Output file format. `csv_basic` excludes True/False questions and the QuestionTagging column. |
 
 #### Response
 

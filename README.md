@@ -205,13 +205,14 @@ The API is the production-ready, event-driven iteration. It introduces **Authent
 
 ### 5. Download Results
 - **Endpoint**: `GET /ai-assessments/download/{job_id}?format=<format>`
-- **Supported formats**: `csv`, `json`, `pdf`, `docx`
+- **Supported formats**: `csv`, `csv_basic`, `json`, `pdf`, `docx`
 - **Ownership**: Only the user who generated the assessment can download it — others get `403 Forbidden`.
 - **Invalid format**: Returns `400 Bad Request` with the list of supported formats.
 
 | Format | Endpoint |
 | :--- | :--- |
-| CSV (7-option V2 schema) | `GET /ai-assessments/download/{job_id}?format=csv` |
+| CSV (full — with QuestionTagging, all types) | `GET /ai-assessments/download/{job_id}?format=csv` |
+| CSV Basic (no T/F, no QuestionTagging) | `GET /ai-assessments/download/{job_id}?format=csv_basic` |
 | JSON | `GET /ai-assessments/download/{job_id}?format=json` |
 | PDF | `GET /ai-assessments/download/{job_id}?format=pdf` |
 | Word (DOCX) | `GET /ai-assessments/download/{job_id}?format=docx` |
