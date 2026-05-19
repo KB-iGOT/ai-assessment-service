@@ -159,12 +159,13 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
 
 def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
     """
-    Basic CSV export — excludes True/False questions and QuestionTagging column.
-    Columns: QuestionNo, QuestionType, Question, Option1..Option7, isOption1Correct..isOption7Correct
+    Basic CSV export — MCQ only (SCA + MCA), no QuestionType/QuestionTagging columns.
+    Columns: SR, Question, Option1..Option6, IsOption1Correct..IsOption6Correct
+    IsOptionNCorrect values: TRUE / FALSE
     """
-    headers = ["QuestionNo", "QuestionType", "Question"]
-    for i in range(1, 8):
-        headers.extend([f"Option{i}", f"isOption{i}Correct"])
+    headers = ["SR", "Question"]
+    for i in range(1, 7):
+        headers.extend([f"Option{i}", f"IsOption{i}Correct"])
 
     rows = []
     questions_obj = assessment_data.get("questions", {})
@@ -172,78 +173,40 @@ def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
 
     all_questions = []
     for q_type, q_list in questions_obj.items():
+        if q_type == "Multiple Choice Question":
+            csv_type = "MCQ-SCA"
+        elif q_type == "Multi-Choice Question":
+            csv_type = "MCQ-MCA"
+        else:
+            continue  # only MCQ types included
         for q in q_list:
-            if q_type == "Multiple Choice Question": csv_type = "MCQ-SCA"
-            elif q_type == "Multi-Choice Question": csv_type = "MCQ-MCA"
-            elif q_type == "True/False Question": continue  # excluded
-            elif q_type == "MTF Question": csv_type = "MTF"
-            elif q_type == "FTB Question": csv_type = "FTB"
-            else: csv_type = q_type
             all_questions.append({"raw": q, "type": csv_type})
 
     for item in all_questions:
         q = item["raw"]
         q_type = item["type"]
 
-        default_q_txt = ""
-        if q_type == "MTF":
-            context = q.get("matching_context", "Match the following items appropriately:")
-            default_q_txt = context if context else "Match the following items appropriately:"
+        q_text = q.get("question_text", "")
 
-        q_text = q.get("question_text", default_q_txt)
-        if q_type == "FTB":
-            q_text = re.sub(r'_{2,}', '<blank>', q_text)
-        if q_type == "MTF":
-            q_text = q.get("matching_context", "Match the following items appropriately:")
+        row = {"SR": q_counter, "Question": q_text}
 
-        row = {
-            "QuestionNo": q_counter,
-            "QuestionType": q_type,
-            "Question": q_text,
-        }
-
-        for i in range(1, 8):
+        for i in range(1, 7):
             row[f"Option{i}"] = ""
-            row[f"isOption{i}Correct"] = ""
+            row[f"IsOption{i}Correct"] = ""
 
-        if q_type in ["MCQ-SCA", "MCQ-MCA"]:
-            options = q.get("options", [])
-            correct_idx = q.get("correct_option_index")
-            correct_set = set()
-            if isinstance(correct_idx, list):
-                correct_set = {int(x) for x in correct_idx}
-            elif correct_idx is not None:
-                correct_set = {int(correct_idx)}
-            for i, opt in enumerate(options[:7]):
-                col_idx = i + 1
-                row[f"Option{col_idx}"] = opt.get("text", "")
-                opt_index = int(opt["index"]) if opt.get("index") is not None else col_idx
-                row[f"isOption{col_idx}Correct"] = "Yes" if opt_index in correct_set else "No"
+        options = q.get("options", [])
+        correct_idx = q.get("correct_option_index")
+        correct_set = set()
+        if isinstance(correct_idx, list):
+            correct_set = {int(x) for x in correct_idx}
+        elif correct_idx is not None:
+            correct_set = {int(correct_idx)}
 
-        elif q_type == "MTF":
-            pairs = q.get("pairs", [])
-            for i, pair in enumerate(pairs[:7]):
-                col_idx = i + 1
-                row[f"Option{col_idx}"] = pair.get("left", "")
-                row[f"isOption{col_idx}Correct"] = pair.get("right", "")
-
-        elif q_type == "FTB":
-            correct_ans = q.get("correct_answer")
-            if isinstance(correct_ans, dict):
-                for i, (k, v) in enumerate(correct_ans.items()):
-                    if i >= 7: break
-                    col_idx = i + 1
-                    row[f"Option{col_idx}"] = v
-                    row[f"isOption{col_idx}Correct"] = f"Blank{col_idx}"
-            elif isinstance(correct_ans, list):
-                for i, v in enumerate(correct_ans):
-                    if i >= 7: break
-                    col_idx = i + 1
-                    row[f"Option{col_idx}"] = v
-                    row[f"isOption{col_idx}Correct"] = f"Blank{col_idx}"
-            else:
-                row["Option1"] = str(correct_ans)
-                row["isOption1Correct"] = "Blank1"
+        for i, opt in enumerate(options[:6]):
+            col_idx = i + 1
+            row[f"Option{col_idx}"] = opt.get("text", "")
+            opt_index = int(opt["index"]) if opt.get("index") is not None else col_idx
+            row[f"IsOption{col_idx}Correct"] = "TRUE" if opt_index in correct_set else "FALSE"
 
         rows.append(row)
         q_counter += 1
