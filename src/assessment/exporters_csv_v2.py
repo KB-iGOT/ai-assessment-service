@@ -1,5 +1,6 @@
 
 import csv
+import re
 from typing import Dict, List, Any
 from pathlib import Path
 
@@ -52,10 +53,14 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
             context = q.get("matching_context", "Match the following items appropriately:")
             default_q_txt = f"{context}\n\n" if context else "Match the following items appropriately:\n\n"
         
+        q_text = q.get("question_text", default_q_txt)
+        if q_type == "FTB":
+            q_text = re.sub(r'_{2,}', '<blank>', q_text)
+
         row = {
             "QuestionNo": q_counter,
             "QuestionType": q_type,
-            "Question": q.get("question_text", f"{default_q_txt}"),
+            "Question": q_text,
             "QuestionTagging": tagging,
         }
         
@@ -146,6 +151,66 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
         q_counter += 1
 
     # Write CSV
+    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
+    """
+    Basic CSV export — MCQ only (SCA + MCA), no QuestionType/QuestionTagging columns.
+    Columns: SR, Question, Option1..Option6, IsOption1Correct..IsOption6Correct
+    IsOptionNCorrect values: TRUE / FALSE
+    """
+    headers = ["SR", "Question"]
+    for i in range(1, 7):
+        headers.extend([f"Option{i}", f"IsOption{i}Correct"])
+
+    rows = []
+    questions_obj = assessment_data.get("questions", {})
+    q_counter = 1
+
+    all_questions = []
+    for q_type, q_list in questions_obj.items():
+        if q_type == "Multiple Choice Question":
+            csv_type = "MCQ-SCA"
+        elif q_type == "Multi-Choice Question":
+            csv_type = "MCQ-MCA"
+        else:
+            continue  # only MCQ types included
+        for q in q_list:
+            all_questions.append({"raw": q, "type": csv_type})
+
+    for item in all_questions:
+        q = item["raw"]
+        q_type = item["type"]
+
+        q_text = q.get("question_text", "")
+
+        row = {"SR": q_counter, "Question": q_text}
+
+        for i in range(1, 7):
+            row[f"Option{i}"] = ""
+            row[f"IsOption{i}Correct"] = ""
+
+        options = q.get("options", [])
+        correct_idx = q.get("correct_option_index")
+        correct_set = set()
+        if isinstance(correct_idx, list):
+            correct_set = {int(x) for x in correct_idx}
+        elif correct_idx is not None:
+            correct_set = {int(correct_idx)}
+
+        for i, opt in enumerate(options[:6]):
+            col_idx = i + 1
+            row[f"Option{col_idx}"] = opt.get("text", "")
+            opt_index = int(opt["index"]) if opt.get("index") is not None else col_idx
+            row[f"IsOption{col_idx}Correct"] = "TRUE" if opt_index in correct_set else "FALSE"
+
+        rows.append(row)
+        q_counter += 1
+
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
