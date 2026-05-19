@@ -340,7 +340,7 @@ async def update_assessment_v1(
         
     return {"message": "Assessment updated successfully", "status": "COMPLETED", "job_id": job_id}
 
-SUPPORTED_FORMATS = {"csv", "json", "pdf", "docx"}
+SUPPORTED_FORMATS = {"csv", "csv_basic", "json", "pdf", "docx"}
 
 @api_v1_router.get(
     "/download/{job_id}",
