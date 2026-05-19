@@ -14,7 +14,7 @@ from .config import INTERACTIVE_COURSES_PATH
 from .exporters import generate_pdf, generate_docx
 from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
 from .events import stop_kafka_producer, send_request_event
-from .exporters_csv_v2 import generate_csv_v2
+from .exporters_csv_v2 import generate_csv_v2, generate_csv_basic
 
 # Configure Logging
 log_dir = Path("logs")
@@ -382,6 +382,11 @@ async def download_assessment_v1(
         path = base_path / f"{job_id}_assessment_v2.csv"
         generate_csv_v2(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.csv", media_type="text/csv")
+
+    elif format == "csv_basic":
+        path = base_path / f"{job_id}_assessment_basic.csv"
+        generate_csv_basic(assessment_json, path)
+        return FileResponse(path, filename=f"{job_id}_assessment_basic.csv", media_type="text/csv")
 
     elif format == "json":
         path = base_path / f"{job_id}_assessment_v2.json"
