@@ -94,6 +94,25 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
   --form 'time_limit="0"'
 ```
 
+#### Comprehensive Assessment (multi-course) — Kong
+
+```bash
+curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/generate' \
+  --header 'x-authenticated-user-token: <keycloak_jwt>' \
+  --header 'Authorization: bearer <kong_jwt_credential>' \
+  --form 'course_ids="do_1144540583527301121908"' \
+  --form 'course_ids="do_113948972799877120197"' \
+  --form 'course_names="Foundations of Public Policy"' \
+  --form 'course_names="Ethics in Governance"' \
+  --form 'assessment_type="comprehensive"' \
+  --form 'difficulty="intermediate"' \
+  --form 'language="english"' \
+  --form 'total_questions="20"' \
+  --form 'question_type_counts="{\"mcq\":10,\"ftb\":5,\"mtf\":5,\"multichoice\":0,\"truefalse\":0}"' \
+  --form 'course_weightage="{\"do_1144540583527301121908\":60,\"do_113948972799877120197\":40}"' \
+  --form 'force="false"'
+```
+
 #### Competency Assessment — Kong
 
 ```bash
@@ -118,7 +137,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
 
 | Parameter | Type | Required | Accepted Values | Description |
 |---|---|---|---|---|
-| `course_ids` | string | Yes* | Any valid iGOT course ID | Comma-separated course IDs. `*`Required unless uploading files. |
+| `course_ids` | string (repeated) | Yes* | Any valid iGOT course ID | Pass as repeated form fields — one per course. `*`Required unless uploading files. Example: `--form 'course_ids="do_1"' --form 'course_ids="do_2"'` |
 | `assessment_type` | string | Yes | `practice`, `final`, `comprehensive`, `standalone`, `competency` | Type of assessment to generate. `comprehensive` combines multiple courses. `competency` generates KCM-focused questions restricted to specified competency area/themes/sub-themes. |
 | `difficulty` | string | Yes | `beginner`, `intermediate`, `advanced` | Target difficulty level of questions. |
 | `language` | string | Yes | `english`, `hindi`, `tamil`, `telugu`, `kannada`, `malayalam`, `marathi`, `bengali`, `gujarati`, `punjabi`, `odia`, `assamese` | Language for generated questions. |
