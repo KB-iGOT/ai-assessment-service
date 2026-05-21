@@ -144,12 +144,20 @@
                             "competency_sub_theme": {
                               "type": "string"
                             }
-                          }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
                         },
                         "domain": {
                           "type": "string"
                         }
-                      }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
                     },
                     "blooms_level_justification": {
                       "type": "string"
@@ -183,7 +191,12 @@
                     "logic_justification": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
                 }
               },
               "required": [
@@ -243,12 +256,20 @@
                             "competency_sub_theme": {
                               "type": "string"
                             }
-                          }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
                         },
                         "domain": {
                           "type": "string"
                         }
-                      }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
                     },
                     "blooms_level_justification": {
                       "type": "string"
@@ -282,7 +303,12 @@
                     "logic_justification": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
                 }
               },
               "required": [
@@ -353,12 +379,20 @@
                             "competency_sub_theme": {
                               "type": "string"
                             }
-                          }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
                         },
                         "domain": {
                           "type": "string"
                         }
-                      }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
                     },
                     "blooms_level_justification": {
                       "type": "string"
@@ -392,7 +426,12 @@
                     "logic_justification": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
                 },
                 "matching_context": {
                   "type": "string"
@@ -475,12 +514,20 @@
                             "competency_sub_theme": {
                               "type": "string"
                             }
-                          }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
                         },
                         "domain": {
                           "type": "string"
                         }
-                      }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
                     },
                     "blooms_level_justification": {
                       "type": "string"
@@ -514,7 +561,12 @@
                     "logic_justification": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
                 }
               },
               "required": [
@@ -578,12 +630,20 @@
                             "competency_sub_theme": {
                               "type": "string"
                             }
-                          }
+                          },
+                          "required": [
+                            "competency_area",
+                            "competency_theme",
+                            "competency_sub_theme"
+                          ]
                         },
                         "domain": {
                           "type": "string"
                         }
-                      }
+                      },
+                      "required": [
+                        "kcm"
+                      ]
                     },
                     "blooms_level_justification": {
                       "type": "string"
@@ -617,7 +677,12 @@
                     "logic_justification": {
                       "type": "string"
                     }
-                  }
+                  },
+                  "required": [
+                    "correct_answer_explanation",
+                    "why_factor",
+                    "logic_justification"
+                  ]
                 }
               },
               "required": [
