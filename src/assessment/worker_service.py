@@ -86,7 +86,9 @@ async def process_job(payload: Dict[str, Any]):
         llm_duration = round(time.monotonic() - t_llm, 2)
         input_tokens = usage.get('prompt_token_count', 'N/A') if usage else 'N/A'
         output_tokens = usage.get('candidates_token_count', 'N/A') if usage else 'N/A'
-        logger.info(f"[{job_id}] LLM generation complete | duration={llm_duration}s | input_tokens={input_tokens} | output_tokens={output_tokens}")
+        thinking_tokens = usage.get('thoughts_token_count', 'N/A') if usage else 'N/A'
+        total_tokens = usage.get('total_token_count', 'N/A') if usage else 'N/A'
+        logger.info(f"[{job_id}] LLM generation complete | duration={llm_duration}s | input_tokens={input_tokens} | thinking_tokens={thinking_tokens} | output_tokens={output_tokens} | total_tokens={total_tokens}")
 
         # 5. Preserve course_names saved at job creation time
         existing = await get_assessment_status(job_id)
