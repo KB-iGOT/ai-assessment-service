@@ -81,6 +81,7 @@ class AssessmentType(str, Enum):
     FINAL = "final"
     COMPREHENSIVE = "comprehensive"
     STANDALONE = "standalone"
+    COMPETENCY = "competency"
 
 class Difficulty(str, Enum):
     BEGINNER = "beginner"
@@ -138,7 +139,10 @@ async def generate_v1(
     ),
     enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
     course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
-    course_names: Optional[str] = Form(None, description="Comma-separated course names matching the order of course_ids"),
+    course_names: Optional[List[str]] = Form(None, description="Course names matching the order of course_ids. Pass as repeated fields or a single comma-separated value."),
+    competency_area: Optional[str] = Form(None, description="Competency area (required for competency assessment type). e.g. 'Behavioural'"),
+    competency_themes: Optional[List[str]] = Form(None, description="Competency themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
+    competency_sub_themes: Optional[List[str]] = Form(None, description="Competency sub-themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     additional_instructions: Optional[str] = Form(""),
     files: Optional[List[Union[UploadFile, str]]] = File(None)
 ):
@@ -171,6 +175,10 @@ async def generate_v1(
     
     if not c_ids and not valid_files:
         raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
+
+    if assessment_type == AssessmentType.COMPETENCY:
+        if not competency_area or not parsed_competency_themes or not parsed_competency_sub_themes:
+            raise HTTPException(status_code=400, detail="competency_area, competency_themes, and competency_sub_themes are required for competency assessment type.")
 
     valid_types = {t.value for t in QuestionType}
 
@@ -255,7 +263,20 @@ async def generate_v1(
             }
 
     # --- 4. Start New Job ---
-    parsed_course_names = [n.strip() for n in course_names.split(",")] if course_names else []
+    parsed_course_names = []
+    if course_names:
+        for item in course_names:
+            parsed_course_names.extend([n.strip() for n in item.split(",") if n.strip()])
+
+    parsed_competency_themes = []
+    if competency_themes:
+        for item in competency_themes:
+            parsed_competency_themes.extend([t.strip() for t in item.split(",") if t.strip()])
+
+    parsed_competency_sub_themes = []
+    if competency_sub_themes:
+        for item in competency_sub_themes:
+            parsed_competency_sub_themes.extend([s.strip() for s in item.split(",") if s.strip()])
     initial_metadata = {
         "course_ids": c_ids,
         "course_names": parsed_course_names,
@@ -267,6 +288,9 @@ async def generate_v1(
             "language": language,
             "time_limit": time_limit,
             "course_weightage": course_weightage,
+            "competency_area": competency_area,
+            "competency_themes": parsed_competency_themes,
+            "competency_sub_themes": parsed_competency_sub_themes,
         }
     }
     await create_job(user_job_id, user_id=user_id, metadata=initial_metadata)
@@ -301,7 +325,10 @@ async def generate_v1(
         "enable_blooms": enable_blooms,
         "course_weightage": course_weightage,
         "question_types": q_types,
-        "time_limit": time_limit
+        "time_limit": time_limit,
+        "competency_area": competency_area,
+        "competency_themes": parsed_competency_themes,
+        "competency_sub_themes": parsed_competency_sub_themes,
     }
 
     await send_request_event(worker_payload)

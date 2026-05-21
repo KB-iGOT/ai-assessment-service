@@ -61,8 +61,8 @@ async def process_job(payload: Dict[str, Any]):
         # Reconstruct params from payload
         metadata, assessment, usage = await generate_assessment(
             course_ids=course_ids,
-            assessment_type=payload.get('assessment_type'), 
-            difficulty_level=payload.get('difficulty'), 
+            assessment_type=payload.get('assessment_type'),
+            difficulty_level=payload.get('difficulty'),
             total_questions=payload.get('total_questions'),
             question_type_counts=payload.get('question_type_counts'),
             additional_instructions=payload.get('additional_instructions'),
@@ -72,7 +72,10 @@ async def process_job(payload: Dict[str, Any]):
             enable_blooms=payload.get('enable_blooms', True),
             course_weightage=payload.get('course_weightage'),
             time_limit=payload.get('time_limit'),
-            extra_files=extra_files
+            extra_files=extra_files,
+            competency_area=payload.get('competency_area'),
+            competency_themes=payload.get('competency_themes'),
+            competency_sub_themes=payload.get('competency_sub_themes'),
         )
         
         # Preserve course_names saved at job creation time

@@ -90,8 +90,8 @@ async def get_or_create_kcm_cache() -> str:
 async def generate_assessment(
     question_type_counts: Dict[str, int],
     course_folder: Optional[Path] = None, # Deprecated in v3.2, kept for backward compat
-    assessment_type: str = "final", 
-    difficulty_level: str = "Intermediate", 
+    assessment_type: str = "final",
+    difficulty_level: str = "Intermediate",
     total_questions: int = 5,
     time_to_complete: Optional[str] = None,
     additional_instructions: Optional[str] = None,
@@ -102,7 +102,10 @@ async def generate_assessment(
     enable_blooms: bool = True,
     course_weightage: Optional[str] = None,
     time_limit: Optional[int] = None,
-    extra_files: Optional[List[Path]] = None
+    extra_files: Optional[List[Path]] = None,
+    competency_area: Optional[str] = None,
+    competency_themes: Optional[str] = None,
+    competency_sub_themes: Optional[str] = None,
 ) -> Tuple[Dict, Dict, Dict]:
     """
     Generates assessment for one or multiple courses.
@@ -258,6 +261,18 @@ async def generate_assessment(
         except Exception as e:
             logger.warning(f"Failed to parse course weightage '{course_weightage}' - falling back to equal distribution. Error: {e}")
 
+    # Build competency focus instruction for competency assessment type
+    competency_focus_instruction = "Not applicable for this assessment type."
+    if assessment_type == "competency" and competency_area:
+        themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
+        sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
+        competency_focus_instruction = (
+            f"Competency Area: {competency_area}\n"
+            f"Competency Themes: {', '.join(themes_list)}\n"
+            f"Competency Sub-Themes: {', '.join(sub_themes_list)}\n"
+            f"ALL questions MUST map to one of the above sub-themes. No other competencies are permitted."
+        )
+
     # 5. Build Prompt
     prompt = build_prompt(
         question_type_counts=question_type_counts,
@@ -273,7 +288,8 @@ async def generate_assessment(
         input_language=input_language,
         topic_names=topics_str,
         blooms_distribution=blooms_str,
-        course_weightage_instruction=course_weightage_instruction
+        course_weightage_instruction=course_weightage_instruction,
+        competency_focus_instruction=competency_focus_instruction,
     )
     
     # 6. Call LLM
@@ -288,9 +304,9 @@ async def generate_assessment(
 
 def build_prompt(
     question_type_counts:Dict[str, int],
-    course_context: str, 
+    course_context: str,
     learning_objectives_str: str,
-    transcript: str, 
+    transcript: str,
     pdf_snippets: str,
     assessment_type: str,
     difficulty_level: str,
@@ -300,7 +316,8 @@ def build_prompt(
     input_language: str,
     topic_names: str,
     blooms_distribution: str,
-    course_weightage_instruction: str
+    course_weightage_instruction: str,
+    competency_focus_instruction: str = "Not applicable for this assessment type.",
 ) -> str:
     prompt_template = ASSESSMENT_PROMPTS.get('system_prompt_template', '')
     
@@ -317,6 +334,7 @@ def build_prompt(
     prompt = prompt.replace("{total_questions_x3}", str(total_questions))
     prompt = prompt.replace("{time_to_complete}", time_to_complete or "Not provided (use standard pacing)")
     prompt = prompt.replace("{course_weightage_instruction}", course_weightage_instruction)
+    prompt = prompt.replace("{competency_focus_instruction}", competency_focus_instruction)
 
     # v3.3 Specifics (Question Types)
     if not question_type_counts:
