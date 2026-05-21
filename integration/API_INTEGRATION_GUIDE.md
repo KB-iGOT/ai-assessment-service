@@ -8,8 +8,8 @@ Import the appropriate collection based on your access method:
 
 | Collection | Access Method | Link |
 |---|---|---|
-| Kong (API / server-to-server) | Requires `x-authenticated-user-token` + Kong JWT | [postman_collection_kong.json](<GITHUB_LINK_TO_postman_collection_kong.json>) |
-| UI Proxy (browser / frontend) | Requires session cookie only | [postman_collection_proxy.json](<GITHUB_LINK_TO_postman_collection_proxy.json>) |
+| Kong (API / server-to-server) | Requires `x-authenticated-user-token` + Kong JWT | [postman_collection_kong.json](https://github.com/aswinpradeep/ai-assessment-service/raw/refs/heads/dev/integration/postman_collection_kong.json) |
+| UI Proxy (browser / frontend) | Requires session cookie only | [postman_collection_proxy.json](https://github.com/aswinpradeep/ai-assessment-service/raw/refs/heads/dev/integration/postman_collection_proxy.json) |
 
 ---
 
