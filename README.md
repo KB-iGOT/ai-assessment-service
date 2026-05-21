@@ -1,12 +1,12 @@
 # Course Assessment Generation
 
-An AI-powered, audit-ready assessment generation system built for the **Karmayogi government learning platform**. Powered by **Google Gemini 2.5 Pro**, FastAPI, and Streamlit, the system follows Senior Instructional Designer logic to produce blueprints and questions with full pedagogic reasoning.
+An AI-powered, audit-ready assessment generation system built for the **Karmayogi government learning platform**. Powered by **Google Gemini** via Vertex AI, FastAPI, and Streamlit, the system follows Senior Instructional Designer logic to produce blueprints and questions with full pedagogic reasoning.
 
 ---
 
 ## Features
 
-- **Model**: Powered by `gemini-2.5-pro` via Google Vertex AI.
+- **Model**: Powered by Google Gemini via Vertex AI (configurable via `GENAI_MODEL_NAME`).
 - **V2 Smart Architecture**: JWT Authentication, Clone-on-Request (instant results), and Private Workspaces.
 - **Event-Driven**: Decoupled API (Producer) and Worker (Consumer) via Kafka. Publishes `ASSESSMENT_COMPLETED` events on job completion.
 - **5 Assessment Types**: Practice (Reinforcement), Final (Certification), Comprehensive (Cross-course), Standalone (uploaded files), and Competency (KCM-focused).
@@ -148,7 +148,7 @@ Copy `.env.example` to `.env` and configure:
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@db:5432/karmayogi_db` |
 | `GOOGLE_PROJECT_ID` | GCP project ID | `my-gcp-project` |
 | `GOOGLE_LOCATION` | Vertex AI region | `us-central1` |
-| `GENAI_MODEL_NAME` | Gemini model name | `gemini-2.5-pro` |
+| `GENAI_MODEL_NAME` | Gemini model name | `gemini-2.5-pro` (or any supported Vertex AI Gemini model) |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Path to credentials JSON | `/app/credentials.json` |
 | `KARMAYOGI_API_KEY` | iGot Karmayogi JWT token | `eyJhbGci...` |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address | `localhost:29092` |
