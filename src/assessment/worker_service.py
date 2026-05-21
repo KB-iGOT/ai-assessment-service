@@ -84,8 +84,8 @@ async def process_job(payload: Dict[str, Any]):
             competency_sub_themes=payload.get('competency_sub_themes'),
         )
         llm_duration = round(time.monotonic() - t_llm, 2)
-        input_tokens = usage.get('input_tokens', 'N/A') if usage else 'N/A'
-        output_tokens = usage.get('output_tokens', 'N/A') if usage else 'N/A'
+        input_tokens = usage.get('prompt_token_count', 'N/A') if usage else 'N/A'
+        output_tokens = usage.get('candidates_token_count', 'N/A') if usage else 'N/A'
         logger.info(f"[{job_id}] LLM generation complete | duration={llm_duration}s | input_tokens={input_tokens} | output_tokens={output_tokens}")
 
         # 5. Preserve course_names saved at job creation time
