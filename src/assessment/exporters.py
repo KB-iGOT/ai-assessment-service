@@ -278,8 +278,14 @@ def generate_docx(assessment_data: dict, output_path: Path):
             kcm = reasoning.get("competency_alignment", {}).get("kcm", {})
             
             r_para = doc.add_paragraph()
-            r_para.add_run(f"\nRationale: {ar.get('correct_answer_explanation', 'N/A')}\n").italic = True
-            r_para.add_run(f"Bloom's: {q.get('blooms_level', 'N/A')} ({reasoning.get('blooms_level_justification', 'N/A')}) | Relevance: {q.get('relevance_percentage', 'N/A')}%\n")
-            r_para.add_run(f"Competency: {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}")
+            r_para.add_run(f"Rationale: {ar.get('correct_answer_explanation', 'N/A')}").italic = True
+
+            blooms_para = doc.add_paragraph()
+            blooms_para.add_run(f"Bloom's: {q.get('blooms_level', 'N/A')} ({reasoning.get('blooms_level_justification', 'N/A')}) | Relevance: {q.get('relevance_percentage', 'N/A')}%")
+
+            comp_para = doc.add_paragraph()
+            comp_para.add_run(f"Competency: {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}")
+
+            doc.add_paragraph()
             
     doc.save(str(output_path))
