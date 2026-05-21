@@ -8,8 +8,8 @@ Import the appropriate collection based on your access method:
 
 | Collection | Access Method | Link |
 |---|---|---|
-| Kong (API / server-to-server) | Requires `x-authenticated-user-token` + Kong JWT | [postman_collection_kong.json](<GITHUB_LINK_TO_postman_collection_kong.json>) |
-| UI Proxy (browser / frontend) | Requires session cookie only | [postman_collection_proxy.json](<GITHUB_LINK_TO_postman_collection_proxy.json>) |
+| Kong (API / server-to-server) | Requires `x-authenticated-user-token` + Kong JWT | [postman_collection_kong.json](https://github.com/aswinpradeep/ai-assessment-service/raw/refs/heads/dev/integration/postman_collection_kong.json) |
+| UI Proxy (browser / frontend) | Requires session cookie only | [postman_collection_proxy.json](https://github.com/aswinpradeep/ai-assessment-service/raw/refs/heads/dev/integration/postman_collection_proxy.json) |
 
 ---
 
@@ -64,6 +64,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
   --header 'x-authenticated-user-token: <keycloak_jwt>' \
   --header 'Authorization: bearer <kong_jwt_credential>' \
   --form 'course_ids="do_1144540583527301121908"' \
+  --form 'course_names="Foundations of Public Policy"' \
   --form 'assessment_type="practice"' \
   --form 'difficulty="intermediate"' \
   --form 'language="english"' \
@@ -81,6 +82,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
 curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/assessments/v1/generate' \
   --header 'cookie: connect.sid=<session_cookie>' \
   --form 'course_ids="do_1144540583527301121908"' \
+  --form 'course_names="Foundations of Public Policy"' \
   --form 'assessment_type="practice"' \
   --form 'difficulty="intermediate"' \
   --form 'language="english"' \
@@ -92,12 +94,51 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
   --form 'time_limit="0"'
 ```
 
+#### Comprehensive Assessment (multi-course) — Kong
+
+```bash
+curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/generate' \
+  --header 'x-authenticated-user-token: <keycloak_jwt>' \
+  --header 'Authorization: bearer <kong_jwt_credential>' \
+  --form 'course_ids="do_1144540583527301121908"' \
+  --form 'course_ids="do_113948972799877120197"' \
+  --form 'course_names="Foundations of Public Policy"' \
+  --form 'course_names="Ethics in Governance"' \
+  --form 'assessment_type="comprehensive"' \
+  --form 'difficulty="intermediate"' \
+  --form 'language="english"' \
+  --form 'total_questions="20"' \
+  --form 'question_type_counts="{\"mcq\":10,\"ftb\":5,\"mtf\":5,\"multichoice\":0,\"truefalse\":0}"' \
+  --form 'course_weightage="{\"do_1144540583527301121908\":60,\"do_113948972799877120197\":40}"' \
+  --form 'force="false"'
+```
+
+#### Competency Assessment — Kong
+
+```bash
+curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/generate' \
+  --header 'x-authenticated-user-token: <keycloak_jwt>' \
+  --header 'Authorization: bearer <kong_jwt_credential>' \
+  --form 'course_ids="do_1144540583527301121908"' \
+  --form 'course_names="Foundations of Public Policy"' \
+  --form 'assessment_type="competency"' \
+  --form 'difficulty="intermediate"' \
+  --form 'language="english"' \
+  --form 'total_questions="10"' \
+  --form 'question_type_counts="{\"mcq\":10,\"ftb\":0,\"mtf\":0,\"multichoice\":0,\"truefalse\":0}"' \
+  --form 'competency_area="Behavioural"' \
+  --form 'competency_themes="Service Orientation"' \
+  --form 'competency_sub_themes="Citizen Centricity"' \
+  --form 'competency_sub_themes="Empathy"' \
+  --form 'force="false"'
+```
+
 #### Request Parameters
 
 | Parameter | Type | Required | Accepted Values | Description |
 |---|---|---|---|---|
-| `course_ids` | string | Yes* | Any valid iGOT course ID | Comma-separated course IDs. `*`Required unless uploading files. |
-| `assessment_type` | string | Yes | `practice`, `final`, `comprehensive`, `standalone` | Type of assessment to generate. `comprehensive` is used when multiple courses are combined. |
+| `course_ids` | string (repeated) | Yes* | Any valid iGOT course ID | Pass as repeated form fields — one per course. `*`Required unless uploading files. Example: `--form 'course_ids="do_1"' --form 'course_ids="do_2"'` |
+| `assessment_type` | string | Yes | `practice`, `final`, `comprehensive`, `standalone`, `competency` | Type of assessment to generate. `comprehensive` combines multiple courses. `competency` generates KCM-focused questions restricted to specified competency area/themes/sub-themes. |
 | `difficulty` | string | Yes | `beginner`, `intermediate`, `advanced` | Target difficulty level of questions. |
 | `language` | string | Yes | `english`, `hindi`, `tamil`, `telugu`, `kannada`, `malayalam`, `marathi`, `bengali`, `gujarati`, `punjabi`, `odia`, `assamese` | Language for generated questions. |
 | `total_questions` | integer | No | Any positive integer | Total number of questions to generate. Default: `5`. |
@@ -107,7 +148,10 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 | `time_limit` | integer | No | `0` or any positive integer | Time limit in minutes. `0` means no limit. |
 | `topic_names` | string | No | Comma-separated topic names | Restrict question generation to specific topics within the course. Leave blank to use all topics. |
 | `course_weightage` | JSON string | No | `{"<course_id>": <percent>, ...}` | Weightage per course when `assessment_type` is `comprehensive`. Values must sum to 100. Example: `{"do_1":60,"do_2":40}` |
-| `course_names` | string | No | Comma-separated course names | Names matching the order of `course_ids`. Used to populate history immediately without waiting for job completion. Example: `"Foundations of Public Policy,Ethics in Governance"` |
+| `course_names` | string (repeated) | No | One value per field | Names matching the order of `course_ids`. Pass as repeated form fields. Used to populate history immediately without waiting for job completion. Example: `--form 'course_names="Foundations of Public Policy"' --form 'course_names="Ethics in Governance"'` |
+| `competency_area` | string | Yes* | Any valid KCM competency area | `*`Required when `assessment_type=competency`. e.g. `"Behavioural"` |
+| `competency_themes` | string (repeated) | Yes* | One value per field | `*`Required when `assessment_type=competency`. Pass as repeated form fields. e.g. `--form 'competency_themes="Service Orientation"' --form 'competency_themes="Integrity"'` |
+| `competency_sub_themes` | string (repeated) | Yes* | One value per field | `*`Required when `assessment_type=competency`. Pass as repeated form fields. e.g. `--form 'competency_sub_themes="Citizen Centricity"' --form 'competency_sub_themes="Empathy"'` |
 | `additional_instructions` | string | No | Free text | Any extra instructions passed to the AI model (e.g. "focus on case studies", "avoid numerical questions"). |
 | `force` | boolean | No | `true`, `false` | `true` bypasses cache and forces a fresh generation. Default: `false`. |
 
@@ -318,7 +362,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/do
   --header 'Authorization: bearer <kong_jwt_credential>' \
   --output assessment.csv
 
-# CSV Basic (no True/False questions, no QuestionTagging column)
+# CSV Basic (MCQ only, SR/Question/Option columns, TRUE/FALSE correctness, max 6 options)
 curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/download/<job_id>?format=csv_basic' \
   --header 'x-authenticated-user-token: <keycloak_jwt>' \
   --header 'Authorization: bearer <kong_jwt_credential>' \
@@ -346,7 +390,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 
 | Parameter | Required | Accepted Values | Description |
 |---|---|---|---|
-| `format` | Yes | `csv`, `csv_basic`, `json`, `pdf`, `docx` | Output file format. `csv_basic` excludes True/False questions and the QuestionTagging column. |
+| `format` | Yes | `csv`, `csv_basic`, `json`, `pdf`, `docx` | Output file format. `csv_basic` includes MCQ questions only (single and multi-answer), with columns `SR`, `Question`, `Option1`–`Option6`, `IsOption1Correct`–`IsOption6Correct`. Correctness values are `TRUE`/`FALSE`. No `QuestionType` or `QuestionTagging` columns. |
 
 #### Response
 

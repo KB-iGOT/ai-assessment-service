@@ -50,7 +50,7 @@
               "type": "text",
               "key": "assessment_type",
               "value": "practice",
-              "description": "practice | final | comprehensive | standalone"
+              "description": "practice | final | comprehensive | standalone | competency"
             },
             {
               "type": "text",
@@ -112,6 +112,24 @@
               "key": "course_names",
               "value": "",
               "description": "Optional — comma-separated course names matching the order of course_ids e.g. \"Course A,Course B\""
+            },
+            {
+              "type": "text",
+              "key": "competency_area",
+              "value": "",
+              "description": "Required for competency type — e.g. Behavioural"
+            },
+            {
+              "type": "text",
+              "key": "competency_themes",
+              "value": "",
+              "description": "Required for competency type — pass as repeated fields e.g. Service Orientation"
+            },
+            {
+              "type": "text",
+              "key": "competency_sub_themes",
+              "value": "",
+              "description": "Required for competency type — pass as repeated fields e.g. Citizen Centricity"
             },
             {
               "type": "text",

@@ -15,7 +15,7 @@ Create a `.env` file and a `credentials.json` file in the project root.
 DATABASE_URL="postgresql://user:pass@db:5432/karmayogi_db"
 GOOGLE_PROJECT_ID="your-project-id"
 GOOGLE_LOCATION="us-central1"
-GENAI_MODEL_NAME="gemini-2.5-pro"
+GENAI_MODEL_NAME="gemini-2.5-pro"  # or any supported Vertex AI Gemini model
 KARMAYOGI_API_KEY="your-api-key"
 ```
 

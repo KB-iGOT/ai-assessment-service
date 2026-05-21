@@ -81,6 +81,7 @@ class AssessmentType(str, Enum):
     FINAL = "final"
     COMPREHENSIVE = "comprehensive"
     STANDALONE = "standalone"
+    COMPETENCY = "competency"
 
 class Difficulty(str, Enum):
     BEGINNER = "beginner"
@@ -138,7 +139,10 @@ async def generate_v1(
     ),
     enable_blooms: bool = Form(True, description="Enable or disable Bloom's taxonomy"),
     course_weightage: Optional[str] = Form(None, description="JSON mapping course IDs to weightage % (Comprehensive Phase only)"),
-    course_names: Optional[str] = Form(None, description="Comma-separated course names matching the order of course_ids"),
+    course_names: Optional[List[str]] = Form(None, description="Course names matching the order of course_ids. Pass as repeated fields or a single comma-separated value."),
+    competency_area: Optional[str] = Form(None, description="Competency area (required for competency assessment type). e.g. 'Behavioural'"),
+    competency_themes: Optional[List[str]] = Form(None, description="Competency themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
+    competency_sub_themes: Optional[List[str]] = Form(None, description="Competency sub-themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     additional_instructions: Optional[str] = Form(""),
     files: Optional[List[Union[UploadFile, str]]] = File(None)
 ):
@@ -171,6 +175,20 @@ async def generate_v1(
     
     if not c_ids and not valid_files:
         raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
+
+    parsed_competency_themes = []
+    if competency_themes:
+        for item in competency_themes:
+            parsed_competency_themes.extend([t.strip() for t in item.split(",") if t.strip()])
+
+    parsed_competency_sub_themes = []
+    if competency_sub_themes:
+        for item in competency_sub_themes:
+            parsed_competency_sub_themes.extend([s.strip() for s in item.split(",") if s.strip()])
+
+    if assessment_type == AssessmentType.COMPETENCY:
+        if not competency_area or not parsed_competency_themes or not parsed_competency_sub_themes:
+            raise HTTPException(status_code=400, detail="competency_area, competency_themes, and competency_sub_themes are required for competency assessment type.")
 
     valid_types = {t.value for t in QuestionType}
 
@@ -217,45 +235,50 @@ async def generate_v1(
     
     user_job_id = f"{composite_id}_{user_id}"
 
+    logger.info(f"[{user_job_id}] Generate request | user={user_id} | type={assessment_type} | courses={c_ids} | questions={total_questions} | language={language} | difficulty={difficulty} | force={force}")
+
     # --- 3. Check Status (V2 Logic: Clone or Generate) ---
-    
+
     # A. Check if THIS user already has this job
     existing_own = await get_assessment_status(user_job_id)
     if existing_own and not force:
-         status = existing_own['status']
-         if status == 'COMPLETED':
-             result = existing_own['assessment_data']
-             return {
-                "message": "Assessment retrieved from cache", 
-                "status": "COMPLETED", 
+        status = existing_own['status']
+        if status == 'COMPLETED':
+            logger.info(f"[{user_job_id}] Cache hit (own) — returning existing result")
+            result = existing_own['assessment_data']
+            return {
+                "message": "Assessment retrieved from cache",
+                "status": "COMPLETED",
                 "job_id": user_job_id,
-                "result": result 
+                "result": result
             }
-         elif status == 'IN_PROGRESS':
-             return {"message": "Assessment generation in progress", "status": "IN_PROGRESS", "job_id": user_job_id}
+        elif status == 'IN_PROGRESS':
+            logger.info(f"[{user_job_id}] Job already IN_PROGRESS — returning status")
+            return {"message": "Assessment generation in progress", "status": "IN_PROGRESS", "job_id": user_job_id}
 
     # B. If not found (or forced), check if a TEMPLATE exists (Shared Cache)
     if not force:
         template = await find_job_by_prefix(composite_id)
         if template:
-            # CLONE IT!
-            logger.info(f"Cloning template {template['course_id']} for user {user_id}")
-            
+            logger.info(f"[{user_job_id}] Cloning from template {template['course_id']} for user {user_id}")
             t_meta = template['metadata']
             t_data = template['assessment_data']
             t_usage = template['token_usage']
-            
             await create_completed_job(user_job_id, user_id, t_meta, t_data, t_usage)
-            
+            logger.info(f"[{user_job_id}] Clone complete")
             return {
-                "message": "Assessment cloned from cache", 
-                "status": "COMPLETED", 
+                "message": "Assessment cloned from cache",
+                "status": "COMPLETED",
                 "job_id": user_job_id,
-                "result": t_data 
+                "result": t_data
             }
 
     # --- 4. Start New Job ---
-    parsed_course_names = [n.strip() for n in course_names.split(",")] if course_names else []
+    parsed_course_names = []
+    if course_names:
+        for item in course_names:
+            parsed_course_names.extend([n.strip() for n in item.split(",") if n.strip()])
+
     initial_metadata = {
         "course_ids": c_ids,
         "course_names": parsed_course_names,
@@ -267,13 +290,16 @@ async def generate_v1(
             "language": language,
             "time_limit": time_limit,
             "course_weightage": course_weightage,
+            "competency_area": competency_area,
+            "competency_themes": parsed_competency_themes,
+            "competency_sub_themes": parsed_competency_sub_themes,
         }
     }
     await create_job(user_job_id, user_id=user_id, metadata=initial_metadata)
-    
+    logger.info(f"[{user_job_id}] Job created in DB with status PENDING")
+
     saved_files = []
     if files:
-        # Use first course ID for temp storage OR 'custom_uploads' folder if no course ID
         storage_folder_name = sorted_ids[0] if c_ids else "custom_uploads"
         temp_dir = Path(INTERACTIVE_COURSES_PATH) / storage_folder_name / "uploads"
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -282,7 +308,7 @@ async def generate_v1(
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             saved_files.append(file_path)
-            logger.info(f"Successfully saved uploaded file: {file.filename} to {file_path}")
+            logger.info(f"[{user_job_id}] Uploaded file saved: {file.filename}")
 
     # Construct Payload for Worker
     worker_payload = {
@@ -301,20 +327,27 @@ async def generate_v1(
         "enable_blooms": enable_blooms,
         "course_weightage": course_weightage,
         "question_types": q_types,
-        "time_limit": time_limit
+        "time_limit": time_limit,
+        "competency_area": competency_area,
+        "competency_themes": parsed_competency_themes,
+        "competency_sub_themes": parsed_competency_sub_themes,
     }
 
     await send_request_event(worker_payload)
-    
+    logger.info(f"[{user_job_id}] Job queued to Kafka | topic={os.getenv('KAFKA_REQUEST_TOPIC', 'assessment.request')}")
     return {"message": "Generation started (Queued)", "status": "PENDING", "job_id": user_job_id}
 
 @api_v1_router.get("/status/{job_id}", summary="Get Assessment Status")
 async def check_status_v1(job_id: str, user_id: str = Depends(get_current_user)):
+    logger.info(f"[{job_id}] Status check | user={user_id}")
     status = await get_assessment_status(job_id)
     if not status:
+        logger.warning(f"[{job_id}] Status check — job not found | user={user_id}")
         return JSONResponse(status_code=404, content={"status": "NOT_FOUND"})
     if status.get('user_id') and status.get('user_id') != user_id:
+        logger.warning(f"[{job_id}] Status check — access denied | requester={user_id} | owner={status.get('user_id')}")
         raise HTTPException(status_code=403, detail="Access denied: you do not own this assessment")
+    logger.info(f"[{job_id}] Status check — current status={status.get('status')}")
     return status
 
 from pydantic import BaseModel
@@ -331,13 +364,12 @@ async def update_assessment_v1(
     Updates the assessment result.
     Enforces that the user owns the assessment.
     """
+    logger.info(f"[{job_id}] Update request | user={user_id}")
     success = await update_job_result(job_id, user_id, payload.assessment_data)
-    
     if not success:
-        # Ambiguous: could be 404 Not Found or 403 Forbidden
-        # But generally means "Resource invalid for this user"
+        logger.warning(f"[{job_id}] Update failed — not found or access denied | user={user_id}")
         raise HTTPException(status_code=404, detail="Assessment not found or you do not have permission to edit it")
-        
+    logger.info(f"[{job_id}] Update successful | user={user_id}")
     return {"message": "Assessment updated successfully", "status": "COMPLETED", "job_id": job_id}
 
 SUPPORTED_FORMATS = {"csv", "csv_basic", "json", "pdf", "docx"}
@@ -362,7 +394,9 @@ async def download_assessment_v1(
     format: str,
     user_id: str = Depends(get_current_user)
 ):
+    logger.info(f"[{job_id}] Download request | format={format} | user={user_id}")
     if format not in SUPPORTED_FORMATS:
+        logger.warning(f"[{job_id}] Download rejected — invalid format={format} | user={user_id}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid format '{format}'. Supported formats: {', '.join(sorted(SUPPORTED_FORMATS))}"
@@ -370,13 +404,16 @@ async def download_assessment_v1(
 
     data = await get_assessment_status(job_id)
     if not data or data['status'] != 'COMPLETED':
+        logger.warning(f"[{job_id}] Download rejected — job not ready or not found | status={data.get('status') if data else 'NOT_FOUND'} | user={user_id}")
         raise HTTPException(status_code=404, detail="Assessment not ready or found")
 
     if data.get('user_id') != user_id:
+        logger.warning(f"[{job_id}] Download rejected — access denied | requester={user_id} | owner={data.get('user_id')}")
         raise HTTPException(status_code=403, detail="Access denied: you do not own this assessment")
 
     assessment_json = data['assessment_data']
     base_path = Path(INTERACTIVE_COURSES_PATH)
+    logger.info(f"[{job_id}] Generating {format} export | user={user_id}")
 
     if format == "csv":
         path = base_path / f"{job_id}_assessment_v2.csv"

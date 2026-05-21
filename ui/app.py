@@ -61,7 +61,7 @@ with tab_gen:
     with st.expander("Detailed Configuration", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "standalone"])
+            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "standalone", "competency"])
         with col2:
             difficulty = st.selectbox("Difficulty", ["beginner", "intermediate", "advanced"], index=1)
         with col3:
@@ -113,7 +113,15 @@ with tab_gen:
                 
         with adv2:
             st.write("")
-        
+
+        if assessment_type == "competency":
+            st.markdown("#### Competency Focus (required for competency type)")
+            comp_area = st.text_input("Competency Area", placeholder="e.g. Behavioural", key="comp_area")
+            comp_themes = st.text_input("Competency Themes (comma-separated)", placeholder="e.g. Service Orientation,Integrity", key="comp_themes")
+            comp_sub_themes = st.text_input("Competency Sub-Themes (comma-separated)", placeholder="e.g. Citizen Centricity,Empathy", key="comp_sub_themes")
+        else:
+            comp_area = comp_themes = comp_sub_themes = None
+
         uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
 
     if st.button("Start Generation", type="primary"):
@@ -143,11 +151,18 @@ with tab_gen:
             payload['course_weightage'] = course_weightage.strip()
 
         if course_names_input and course_names_input.strip():
-            payload['course_names'] = course_names_input.strip()
+            payload['course_names'] = [n.strip() for n in course_names_input.split(",") if n.strip()]
         
         if time_limit > 0:
             payload['time_limit'] = time_limit
-        
+
+        if comp_area:
+            payload['competency_area'] = comp_area
+        if comp_themes:
+            payload['competency_themes'] = [t.strip() for t in comp_themes.split(",") if t.strip()]
+        if comp_sub_themes:
+            payload['competency_sub_themes'] = [s.strip() for s in comp_sub_themes.split(",") if s.strip()]
+
         files = []
         if uploaded_files:
             for f in uploaded_files:
@@ -291,7 +306,7 @@ with tab_comp:
             'course_weightage': json.dumps(c_weights)
         }
         if any(c_names):
-            comp_payload['course_names'] = ",".join(c_names)
+            comp_payload['course_names'] = [n for n in c_names if n]
         
         if comp_enable_blooms and comp_blooms_config:
             comp_payload['blooms_config'] = json.dumps(comp_blooms_config)
@@ -347,12 +362,13 @@ with tab_view:
         if status == "COMPLETED":
             # Downloads — token sent in header, not URL query param
             st.markdown("### 📥 Downloads")
-            d1, d2, d3, d4 = st.columns(4)
+            d1, d2, d3, d4, d5 = st.columns(5)
             for fmt, col, label, mime in [
                 ("csv",       d1, "Download CSV",       "text/csv"),
                 ("csv_basic", d2, "Download CSV Basic", "text/csv"),
                 ("json",      d3, "Download JSON",      "application/json"),
                 ("pdf",       d4, "Download PDF",       "application/pdf"),
+                ("docx",      d5, "Download DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             ]:
                 try:
                     dl_resp = requests.get(
@@ -545,11 +561,12 @@ with tab_history:
                             st.success(f"Job {job_id} loaded! Switch to 'View & Edit Result' tab.")
                         
                         # Downloads — token sent in header, not URL query param
-                        dl_col1, dl_col2, dl_col3 = st.columns(3)
+                        dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
                         for fmt, col, label, mime in [
                             ("csv",       dl_col1, "CSV",       "text/csv"),
                             ("csv_basic", dl_col2, "CSV Basic", "text/csv"),
                             ("pdf",       dl_col3, "PDF",       "application/pdf"),
+                            ("docx",      dl_col4, "DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
                         ]:
                             try:
                                 dl_r = requests.get(
