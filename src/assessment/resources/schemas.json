@@ -105,7 +105,7 @@
                         "type": "string"
                       },
                       "index": {
-                        "type": "string"
+                        "type": "integer"
                       }
                     },
                     "required": [
@@ -115,7 +115,7 @@
                   }
                 },
                 "correct_option_index": {
-                  "type": "string"
+                  "type": "integer"
                 },
                 "difficulty_level": {
                   "type": "string"
@@ -174,7 +174,7 @@
                   }
                 },
                 "relevance_percentage": {
-                  "type": "string"
+                  "type": "integer"
                 },
                 "course_name": {
                   "type": "string"
@@ -286,7 +286,7 @@
                   }
                 },
                 "relevance_percentage": {
-                  "type": "string"
+                  "type": "integer"
                 },
                 "course_name": {
                   "type": "string"
@@ -409,7 +409,7 @@
                   }
                 },
                 "relevance_percentage": {
-                  "type": "string"
+                  "type": "integer"
                 },
                 "course_name": {
                   "type": "string"
@@ -472,7 +472,7 @@
                         "type": "string"
                       },
                       "index": {
-                        "type": "string"
+                        "type": "integer"
                       }
                     },
                     "required": [
@@ -484,7 +484,7 @@
                 "correct_option_index": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "integer"
                   }
                 },
                 "difficulty_level": {
@@ -544,7 +544,7 @@
                   }
                 },
                 "relevance_percentage": {
-                  "type": "string"
+                  "type": "integer"
                 },
                 "course_name": {
                   "type": "string"
@@ -660,7 +660,7 @@
                   }
                 },
                 "relevance_percentage": {
-                  "type": "string"
+                  "type": "integer"
                 },
                 "course_name": {
                   "type": "string"
