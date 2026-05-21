@@ -347,12 +347,13 @@ with tab_view:
         if status == "COMPLETED":
             # Downloads — token sent in header, not URL query param
             st.markdown("### 📥 Downloads")
-            d1, d2, d3, d4 = st.columns(4)
+            d1, d2, d3, d4, d5 = st.columns(5)
             for fmt, col, label, mime in [
                 ("csv",       d1, "Download CSV",       "text/csv"),
                 ("csv_basic", d2, "Download CSV Basic", "text/csv"),
                 ("json",      d3, "Download JSON",      "application/json"),
                 ("pdf",       d4, "Download PDF",       "application/pdf"),
+                ("docx",      d5, "Download DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             ]:
                 try:
                     dl_resp = requests.get(
@@ -545,11 +546,12 @@ with tab_history:
                             st.success(f"Job {job_id} loaded! Switch to 'View & Edit Result' tab.")
                         
                         # Downloads — token sent in header, not URL query param
-                        dl_col1, dl_col2, dl_col3 = st.columns(3)
+                        dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
                         for fmt, col, label, mime in [
                             ("csv",       dl_col1, "CSV",       "text/csv"),
                             ("csv_basic", dl_col2, "CSV Basic", "text/csv"),
                             ("pdf",       dl_col3, "PDF",       "application/pdf"),
+                            ("docx",      dl_col4, "DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
                         ]:
                             try:
                                 dl_r = requests.get(
