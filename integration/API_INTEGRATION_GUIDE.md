@@ -64,6 +64,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
   --header 'x-authenticated-user-token: <keycloak_jwt>' \
   --header 'Authorization: bearer <kong_jwt_credential>' \
   --form 'course_ids="do_1144540583527301121908"' \
+  --form 'course_names="Foundations of Public Policy"' \
   --form 'assessment_type="practice"' \
   --form 'difficulty="intermediate"' \
   --form 'language="english"' \
@@ -81,6 +82,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
 curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/assessments/v1/generate' \
   --header 'cookie: connect.sid=<session_cookie>' \
   --form 'course_ids="do_1144540583527301121908"' \
+  --form 'course_names="Foundations of Public Policy"' \
   --form 'assessment_type="practice"' \
   --form 'difficulty="intermediate"' \
   --form 'language="english"' \
@@ -318,7 +320,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/do
   --header 'Authorization: bearer <kong_jwt_credential>' \
   --output assessment.csv
 
-# CSV Basic (no True/False questions, no QuestionTagging column)
+# CSV Basic (MCQ only, SR/Question/Option columns, TRUE/FALSE correctness, max 6 options)
 curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/download/<job_id>?format=csv_basic' \
   --header 'x-authenticated-user-token: <keycloak_jwt>' \
   --header 'Authorization: bearer <kong_jwt_credential>' \
@@ -346,7 +348,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 
 | Parameter | Required | Accepted Values | Description |
 |---|---|---|---|
-| `format` | Yes | `csv`, `csv_basic`, `json`, `pdf`, `docx` | Output file format. `csv_basic` excludes True/False questions and the QuestionTagging column. |
+| `format` | Yes | `csv`, `csv_basic`, `json`, `pdf`, `docx` | Output file format. `csv_basic` includes MCQ questions only (single and multi-answer), with columns `SR`, `Question`, `Option1`–`Option6`, `IsOption1Correct`–`IsOption6Correct`. Correctness values are `TRUE`/`FALSE`. No `QuestionType` or `QuestionTagging` columns. |
 
 #### Response
 
