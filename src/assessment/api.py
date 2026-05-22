@@ -10,7 +10,8 @@ from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
 
 from .db import init_db, close_db, create_job, get_assessment_status, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
-from .config import INTERACTIVE_COURSES_PATH
+from .config import INTERACTIVE_COURSES_PATH, GCS_BUCKET_NAME, GCS_UPLOAD_PREFIX
+from .gcs import upload_to_gcs
 from .exporters import generate_pdf, generate_docx
 from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
 from .events import stop_kafka_producer, send_request_event
@@ -307,8 +308,15 @@ async def generate_v1(
             file_path = temp_dir / file.filename
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            saved_files.append(file_path)
-            logger.info(f"[{user_job_id}] Uploaded file saved: {file.filename}")
+            if GCS_BUCKET_NAME:
+                gcs_path = f"{GCS_UPLOAD_PREFIX}/{user_job_id}/{file.filename}"
+                upload_to_gcs(file_path, gcs_path)
+                saved_files.append(f"gcs://{gcs_path}")
+                file_path.unlink(missing_ok=True)
+                logger.info(f"[{user_job_id}] Uploaded file saved to GCS: {file.filename}")
+            else:
+                saved_files.append(str(file_path))
+                logger.info(f"[{user_job_id}] Uploaded file saved locally: {file.filename}")
 
     # Construct Payload for Worker
     worker_payload = {

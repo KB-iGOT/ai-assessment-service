@@ -95,7 +95,8 @@ For the full architecture including sequence diagrams, database schema, and cach
 ### Initial Setup
 1. Clone this repository.
 2. Copy `.env.example` to `.env` and fill in all required values.
-3. Place your Google Cloud Service Account JSON file in the root as `credentials.json`.
+3. Place your Vertex AI service account JSON file in the root as `credentials.json`.
+4. *(Kubernetes / multi-pod only)* Place your GCS service account JSON file in the root as `gcs_credentials.json` and set `GCS_BUCKET_NAME` in `.env`.
 
 ### Method 1: Docker (Recommended)
 
@@ -149,13 +150,16 @@ Copy `.env.example` to `.env` and configure:
 | `GOOGLE_PROJECT_ID` | GCP project ID | `my-gcp-project` |
 | `GOOGLE_LOCATION` | Vertex AI region | `us-central1` |
 | `GENAI_MODEL_NAME` | Gemini model name | `gemini-2.5-pro` (or any supported Vertex AI Gemini model) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to credentials JSON | `/app/credentials.json` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to Vertex AI credentials JSON | `/app/credentials.json` |
 | `KARMAYOGI_API_KEY` | iGot Karmayogi JWT token | `eyJhbGci...` |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address | `localhost:29092` |
 | `KAFKA_TOPIC` | Kafka topic name | `assessment.lifecycle.events` |
 | `MAX_CONCURRENCY` | Max parallel generation jobs | `50` |
 | `CLEANUP_RETENTION_DAYS` | Days before auto-deletion | `7` |
 | `DISABLE_AUTH_VERIFICATION` | Bypass JWT check (dev only) | `false` |
+| `GCS_CREDENTIALS` | Path to GCS service account JSON | `/app/gcs_credentials.json` |
+| `GCS_BUCKET_NAME` | GCS bucket for standalone uploads (leave empty to use local disk) | `your-bucket-name` |
+| `GCS_UPLOAD_PREFIX` | Path prefix inside the GCS bucket | `ai-assessments/uploads` |
 
 ---
 

@@ -17,10 +17,18 @@ GOOGLE_PROJECT_ID="your-project-id"
 GOOGLE_LOCATION="us-central1"
 GENAI_MODEL_NAME="gemini-2.5-pro"  # or any supported Vertex AI Gemini model
 KARMAYOGI_API_KEY="your-api-key"
+
+# GCS — required for standalone assessment file uploads in multi-pod deployments
+GCS_CREDENTIALS="/app/gcs_credentials.json"  # path to GCS service account JSON inside container
+GCS_BUCKET_NAME="your-gcs-bucket-name"
+GCS_UPLOAD_PREFIX="ai-assessments/uploads"   # optional, this is the default
 ```
 
 ### credentials.json:
-Place your Google Cloud Service Account key file in the root as `credentials.json`.
+Place your Google Vertex AI service account key file in the root as `credentials.json`.
+
+### gcs_credentials.json:
+Place your GCS service account key file in the root as `gcs_credentials.json`. This is a separate service account with `Storage Object Admin` permissions on the GCS bucket.
 
 ## 3. Deployment Commands
 
