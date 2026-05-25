@@ -43,6 +43,13 @@ GOOGLE_LOCATION = os.getenv("GOOGLE_LOCATION", "us-central1")
 GENAI_MODEL_NAME = os.getenv("GENAI_MODEL_NAME", "gemini-2.5-pro")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
+# Storage backend for standalone upload file sharing between API and Worker pods
+# DOCUMENT_STORAGE_TYPE: "local" (default, single-node) | "gcs" (multi-pod / Kubernetes)
+DOCUMENT_STORAGE_TYPE = os.getenv("DOCUMENT_STORAGE_TYPE", "local")
+GCS_CREDENTIALS = os.getenv("GCS_CREDENTIALS")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "")
+GCS_UPLOAD_PREFIX = os.getenv("GCS_UPLOAD_PREFIX", "ai-assessments/uploads")
+
 # Headers for Karmayogi API
 if not KARMAYOGI_API_KEY:
     raise RuntimeError("Missing mandatory env var: KARMAYOGI_API_KEY")

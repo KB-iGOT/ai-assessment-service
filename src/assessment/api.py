@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from .db import init_db, close_db, create_job, get_assessment_status, find_job_by_prefix, create_completed_job, update_job_result, get_user_assessments_history
 from .config import INTERACTIVE_COURSES_PATH
+from .storage import get_storage_service
 from .exporters import generate_pdf, generate_docx
 from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
 from .events import stop_kafka_producer, send_request_event
@@ -173,9 +174,6 @@ async def generate_v1(
         for item in course_ids:
             c_ids.extend([c.strip() for c in item.split(",") if c.strip()])
     
-    if not c_ids and not valid_files:
-        raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
-
     parsed_competency_themes = []
     if competency_themes:
         for item in competency_themes:
@@ -189,6 +187,9 @@ async def generate_v1(
     if assessment_type == AssessmentType.COMPETENCY:
         if not competency_area or not parsed_competency_themes or not parsed_competency_sub_themes:
             raise HTTPException(status_code=400, detail="competency_area, competency_themes, and competency_sub_themes are required for competency assessment type.")
+        # competency type can work purely from KCM descriptions — no course_ids or files required
+    elif not c_ids and not valid_files:
+        raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
 
     valid_types = {t.value for t in QuestionType}
 
@@ -300,15 +301,11 @@ async def generate_v1(
 
     saved_files = []
     if files:
-        storage_folder_name = sorted_ids[0] if c_ids else "custom_uploads"
-        temp_dir = Path(INTERACTIVE_COURSES_PATH) / storage_folder_name / "uploads"
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        storage = get_storage_service()
         for file in files:
-            file_path = temp_dir / file.filename
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            saved_files.append(file_path)
-            logger.info(f"[{user_job_id}] Uploaded file saved: {file.filename}")
+            stored_path, size = storage.save_file(file.file, file.filename, user_job_id)
+            saved_files.append(stored_path)
+            logger.info(f"[{user_job_id}] Uploaded file stored: {file.filename} ({size} bytes) → {stored_path}")
 
     # Construct Payload for Worker
     worker_payload = {
