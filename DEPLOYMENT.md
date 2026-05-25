@@ -18,10 +18,12 @@ GOOGLE_LOCATION="us-central1"
 GENAI_MODEL_NAME="gemini-2.5-pro"  # or any supported Vertex AI Gemini model
 KARMAYOGI_API_KEY="your-api-key"
 
-# GCS — required for standalone assessment file uploads in multi-pod deployments
-GCS_CREDENTIALS="/app/gcs_credentials.json"  # path to GCS service account JSON inside container
-GCS_BUCKET_NAME="your-gcs-bucket-name"
-GCS_UPLOAD_PREFIX="ai-assessments/uploads"   # optional, this is the default
+# Storage backend for uploaded files — "local" (default) or "gcs"
+# Use "gcs" in Kubernetes/multi-pod deployments where API and Worker run as separate pods
+DOCUMENT_STORAGE_TYPE=local
+GCS_CREDENTIALS="/app/gcs_credentials.json"  # path to GCS service account JSON (only when type=gcs)
+GCS_BUCKET_NAME="your-gcs-bucket-name"       # only when type=gcs
+GCS_UPLOAD_PREFIX="ai-assessments/uploads"   # optional prefix, default shown
 ```
 
 ### credentials.json:

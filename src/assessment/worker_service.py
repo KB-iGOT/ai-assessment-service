@@ -14,8 +14,8 @@ from .db import init_db, close_db, update_job_status, save_assessment_result, ge
 from .fetcher import fetch_course_data
 from .generator import generate_assessment
 from .events import get_kafka_consumer, send_completion_event, stop_kafka_producer
-from .config import INTERACTIVE_COURSES_PATH, GCS_BUCKET_NAME
-from .gcs import download_from_gcs, delete_from_gcs
+from .config import INTERACTIVE_COURSES_PATH
+from .storage import get_storage_service
 
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)
@@ -50,20 +50,18 @@ async def process_job(payload: Dict[str, Any]):
         # 2. Setup Paths
         base_path = Path(INTERACTIVE_COURSES_PATH)
         extra_files_str = payload.get('extra_files', [])
-        gcs_paths_to_cleanup = []
+        stored_paths_to_cleanup = []
         extra_files = []
-        for p in extra_files_str:
-            if p.startswith("gcs://") and GCS_BUCKET_NAME:
-                gcs_path = p[len("gcs://"):]
-                local_path = Path(INTERACTIVE_COURSES_PATH) / "gcs_downloads" / job_id / Path(gcs_path).name
-                download_from_gcs(gcs_path, local_path)
-                extra_files.append(local_path)
-                gcs_paths_to_cleanup.append(gcs_path)
-                logger.info(f"[{job_id}] Downloaded from GCS: {gcs_path} → {local_path}")
-            else:
-                extra_files.append(Path(p))
+        if extra_files_str:
+            storage = get_storage_service()
+            for stored_path in extra_files_str:
+                local_dest = Path(INTERACTIVE_COURSES_PATH) / "storage_downloads" / job_id / Path(stored_path).name
+                storage.read_file(stored_path, local_dest)
+                extra_files.append(local_dest)
+                stored_paths_to_cleanup.append(stored_path)
+                logger.info(f"[{job_id}] File retrieved from storage: {stored_path} → {local_dest}")
         if extra_files:
-            logger.info(f"[{job_id}] Extra files: {[str(p) for p in extra_files]}")
+            logger.info(f"[{job_id}] Extra files ready: {[str(p) for p in extra_files]}")
 
         # 3. Fetch Course Content
         for cid in course_ids:
@@ -127,9 +125,11 @@ async def process_job(payload: Dict[str, Any]):
         await save_assessment_result(job_id, metadata, assessment, usage)
         logger.info(f"[{job_id}] Result saved to DB")
 
-        # 7. Cleanup GCS uploads after successful processing
-        for gcs_path in gcs_paths_to_cleanup:
-            delete_from_gcs(gcs_path)
+        # 7. Cleanup uploaded files from storage after successful processing
+        if stored_paths_to_cleanup:
+            storage = get_storage_service()
+            for stored_path in stored_paths_to_cleanup:
+                storage.delete_file(stored_path)
 
         # 8. Notify Completion
         await send_completion_event(job_id, user_id, "COMPLETED", {"course_ids": course_ids})

@@ -157,8 +157,9 @@ Copy `.env.example` to `.env` and configure:
 | `MAX_CONCURRENCY` | Max parallel generation jobs | `50` |
 | `CLEANUP_RETENTION_DAYS` | Days before auto-deletion | `7` |
 | `DISABLE_AUTH_VERIFICATION` | Bypass JWT check (dev only) | `false` |
-| `GCS_CREDENTIALS` | Path to GCS service account JSON | `/app/gcs_credentials.json` |
-| `GCS_BUCKET_NAME` | GCS bucket for standalone uploads (leave empty to use local disk) | `your-bucket-name` |
+| `DOCUMENT_STORAGE_TYPE` | Storage backend for uploaded files — `local` (default) or `gcs` | `local` |
+| `GCS_CREDENTIALS` | Path to GCS service account JSON (only when `DOCUMENT_STORAGE_TYPE=gcs`) | `/app/gcs_credentials.json` |
+| `GCS_BUCKET_NAME` | GCS bucket name (only when `DOCUMENT_STORAGE_TYPE=gcs`) | `your-bucket-name` |
 | `GCS_UPLOAD_PREFIX` | Path prefix inside the GCS bucket | `ai-assessments/uploads` |
 
 ---
