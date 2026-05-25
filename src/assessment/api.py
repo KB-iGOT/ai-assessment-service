@@ -307,11 +307,12 @@ async def generate_v1(
             saved_files.append(stored_path)
             logger.info(f"[{user_job_id}] Uploaded file stored: {file.filename} ({size} bytes) → {stored_path}")
 
-    # Construct Payload for Worker
+    # Construct Payload for Worker — full self-contained payload, no DB roundtrip needed
     worker_payload = {
         "job_id": user_job_id, # Use user_job_id for the worker to process
         "user_id": user_id, # V2: Pass real user_id
         "course_ids": c_ids,
+        "course_names": parsed_course_names,
         "extra_files": [str(p) for p in saved_files],
         "assessment_type": assessment_type.value if hasattr(assessment_type, 'value') else assessment_type,
         "difficulty": difficulty.value if hasattr(difficulty, 'value') else difficulty,
@@ -328,6 +329,8 @@ async def generate_v1(
         "competency_area": competency_area,
         "competency_themes": parsed_competency_themes,
         "competency_sub_themes": parsed_competency_sub_themes,
+        # Pre-built config dict — worker reuses this verbatim as the DB-stored config
+        "config": initial_metadata["config"],
     }
 
     await send_request_event(worker_payload)

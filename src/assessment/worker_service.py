@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 import shutil
 
 # Reuse existing modules
-from .db import init_db, close_db, update_job_status, save_assessment_result, get_assessment_status
+from .db import init_db, close_db, update_job_status, save_assessment_result
 from .fetcher import fetch_course_data
 from .generator import generate_assessment
 from .events import get_kafka_consumer, send_completion_event, stop_kafka_producer
@@ -100,28 +100,26 @@ async def process_job(payload: Dict[str, Any]):
         total_tokens = usage.get('total_token_count', 'N/A') if usage else 'N/A'
         logger.info(f"[{job_id}] LLM generation complete | duration={llm_duration}s | input_tokens={input_tokens} | thinking_tokens={thinking_tokens} | output_tokens={output_tokens} | total_tokens={total_tokens}")
 
-        # 5. Preserve course_names saved at job creation time
-        existing = await get_assessment_status(job_id)
-        existing_meta = (existing.get("metadata") or {}) if existing else {}
-        if isinstance(existing_meta, str):
-            try:
-                existing_meta = json.loads(existing_meta)
-            except Exception:
-                existing_meta = {}
-
+        # 5. Build final metadata from the Kafka payload — single source of truth.
+        #    The API sends a complete, self-contained payload; the worker no longer
+        #    reads back from DB to reconstruct what the user requested.
         metadata['course_ids'] = course_ids
-        metadata['course_names'] = existing_meta.get('course_names', [])
-        metadata['config'] = {
+        metadata['course_names'] = payload.get('course_names', [])
+        metadata['config'] = payload.get('config') or {
             "assessment_type": assessment_type,
             "difficulty": payload.get('difficulty'),
             "total_questions": payload.get('total_questions'),
             "question_type_counts": payload.get('question_type_counts'),
             "language": payload.get('language'),
             "time_limit": payload.get('time_limit'),
-            "course_weightage": payload.get('course_weightage')
+            "course_weightage": payload.get('course_weightage'),
+            "competency_area": payload.get('competency_area'),
+            "competency_themes": payload.get('competency_themes'),
+            "competency_sub_themes": payload.get('competency_sub_themes'),
         }
 
         # 6. Save Result
+        logger.info(f"[{job_id}] Saving metadata | course_ids={metadata.get('course_ids')} | course_names={metadata.get('course_names')}")
         await save_assessment_result(job_id, metadata, assessment, usage)
         logger.info(f"[{job_id}] Result saved to DB")
 

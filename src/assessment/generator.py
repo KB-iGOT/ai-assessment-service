@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
+from google.genai.errors import APIError, ServerError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .config import (
@@ -408,7 +408,12 @@ def build_prompt(
 
     return prompt
 
-@retry(retry=retry_if_exception_type((Exception, APIError)), stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(
+    retry=retry_if_exception_type((ServerError, asyncio.TimeoutError)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 async def call_llm(prompt: str) -> Tuple[str, Dict[str, Any]]:
     global _active_kcm_cache
     if not client:
