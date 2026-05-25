@@ -137,8 +137,8 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
 
 | Parameter | Type | Required | Accepted Values | Description |
 |---|---|---|---|---|
-| `course_ids` | string (repeated) | Yes* | Any valid iGOT course ID | Pass as repeated form fields — one per course. `*`Required unless uploading files. Example: `--form 'course_ids="do_1"' --form 'course_ids="do_2"'` |
-| `assessment_type` | string | Yes | `practice`, `final`, `comprehensive`, `standalone`, `competency` | Type of assessment to generate. `comprehensive` combines multiple courses. `competency` generates KCM-focused questions restricted to specified competency area/themes/sub-themes. |
+| `course_ids` | string (repeated) | Yes* | Any valid iGOT course ID | Pass as repeated form fields — one per course. `*`Required unless uploading files or using `competency` type. Example: `--form 'course_ids="do_1"' --form 'course_ids="do_2"'` |
+| `assessment_type` | string | Yes | `practice`, `final`, `comprehensive`, `standalone`, `competency` | Type of assessment to generate. `comprehensive` combines multiple courses. `competency` generates KCM-focused questions — course_ids are optional, questions can be generated purely from KCM descriptions. |
 | `difficulty` | string | Yes | `beginner`, `intermediate`, `advanced` | Target difficulty level of questions. |
 | `language` | string | Yes | `english`, `hindi`, `tamil`, `telugu`, `kannada`, `malayalam`, `marathi`, `bengali`, `gujarati`, `punjabi`, `odia`, `assamese` | Language for generated questions. |
 | `total_questions` | integer | No | Any positive integer | Total number of questions to generate. Default: `5`. |
