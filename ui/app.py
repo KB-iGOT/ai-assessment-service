@@ -54,7 +54,7 @@ with tab_gen:
             course_ids_input = ""
             course_names_input = ""
         else:
-            course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...")
+            course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...", help="Optional for competency type — leave blank to generate purely from KCM descriptions")
             course_names_input = st.text_input("Course Names (comma-separated)", placeholder="Foundations of Public Policy, Ethics in Governance", help="Optional — used to show course names in history immediately")
 
     # Config Form
@@ -116,6 +116,7 @@ with tab_gen:
 
         if assessment_type == "competency":
             st.markdown("#### Competency Focus (required for competency type)")
+            st.caption("Leave Course IDs blank to generate purely from KCM descriptions (no course content needed).")
             comp_area = st.text_input("Competency Area", placeholder="e.g. Behavioural", key="comp_area")
             comp_themes = st.text_input("Competency Themes (comma-separated)", placeholder="e.g. Service Orientation,Integrity", key="comp_themes")
             comp_sub_themes = st.text_input("Competency Sub-Themes (comma-separated)", placeholder="e.g. Citizen Centricity,Empathy", key="comp_sub_themes")
@@ -134,8 +135,7 @@ with tab_gen:
         q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "multichoice": multi, "truefalse": tf}
         
         payload = {
-            'course_ids': course_ids_input,
-            'force': 'true' if force_new else 'false', 
+            'force': 'true' if force_new else 'false',
             'assessment_type': assessment_type,
             'difficulty': difficulty,
             'total_questions': sum(q_counts.values()),
@@ -143,6 +143,8 @@ with tab_gen:
             'language': language,
             'enable_blooms': 'true' if enable_blooms else 'false'
         }
+        if course_ids_input and course_ids_input.strip():
+            payload['course_ids'] = course_ids_input
         
         if enable_blooms and blooms_config:
             payload['blooms_config'] = json.dumps(blooms_config)

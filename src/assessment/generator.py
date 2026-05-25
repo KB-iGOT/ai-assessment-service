@@ -203,12 +203,36 @@ async def generate_assessment(
                  except Exception as e:
                      logger.warning(f"Failed to read PDF {pdf_file}: {e}")
     else:
-        # Dummy Metadata for Custom Uploads
-        aggregated_metadata["courses"].append({
-             "name": "User Uploaded Content", 
-             "code": "CUSTOM_UPLOAD", 
-             "description": "Assessment generated from user provided files (PDF/VTT)."
-         })
+        if assessment_type == "competency" and competency_area:
+            # No course content — build context from KCM descriptions matching the requested area/themes/sub-themes
+            themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
+            sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
+            matched = [
+                entry for entry in KCM_DESCRIPTIONS_FILE
+                if (
+                    entry.get("Area", "").lower() in [t.lower() for t in themes_list] or
+                    entry.get("Label", "").lower() in [s.lower() for s in sub_themes_list]
+                )
+            ]
+            if matched:
+                kcm_content = "\n\n".join([
+                    f"Sub-Theme: {e.get('Label')}\nArea: {e.get('Area')}\nDescription: {e.get('Description')}\nLevels: {json.dumps(e.get('Levels', {}))}"
+                    for e in matched
+                ])
+                combined_transcript.append(f"--- KCM COMPETENCY REFERENCE ---\n{kcm_content}")
+                logger.info(f"Competency-only mode: injected {len(matched)} KCM entries for area='{competency_area}' themes={themes_list} sub_themes={sub_themes_list}")
+            aggregated_metadata["courses"].append({
+                "name": f"Competency Assessment — {competency_area}",
+                "code": "KCM_COMPETENCY",
+                "description": f"Assessment generated from KCM competency framework. Area: {competency_area}, Themes: {', '.join(themes_list)}, Sub-Themes: {', '.join(sub_themes_list)}"
+            })
+        else:
+            # Dummy Metadata for Custom Uploads
+            aggregated_metadata["courses"].append({
+                "name": "User Uploaded Content",
+                "code": "CUSTOM_UPLOAD",
+                "description": "Assessment generated from user provided files (PDF/VTT)."
+            })
 
     # Process Extra Uploaded Files (from API)
     if extra_files:

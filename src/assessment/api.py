@@ -174,9 +174,6 @@ async def generate_v1(
         for item in course_ids:
             c_ids.extend([c.strip() for c in item.split(",") if c.strip()])
     
-    if not c_ids and not valid_files:
-        raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
-
     parsed_competency_themes = []
     if competency_themes:
         for item in competency_themes:
@@ -190,6 +187,9 @@ async def generate_v1(
     if assessment_type == AssessmentType.COMPETENCY:
         if not competency_area or not parsed_competency_themes or not parsed_competency_sub_themes:
             raise HTTPException(status_code=400, detail="competency_area, competency_themes, and competency_sub_themes are required for competency assessment type.")
+        # competency type can work purely from KCM descriptions — no course_ids or files required
+    elif not c_ids and not valid_files:
+        raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
 
     valid_types = {t.value for t in QuestionType}
 
