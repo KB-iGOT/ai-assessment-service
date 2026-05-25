@@ -52,14 +52,16 @@ with tab_gen:
             st.info("Upload-only mode active. Please upload files below.")
             course_id = ""
             course_ids_input = ""
+            course_names_input = ""
         else:
-            course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...")
+            course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...", help="Optional for competency type — leave blank to generate purely from KCM descriptions")
+            course_names_input = st.text_input("Course Names (comma-separated)", placeholder="Foundations of Public Policy, Ethics in Governance", help="Optional — used to show course names in history immediately")
 
     # Config Form
     with st.expander("Detailed Configuration", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "standalone"])
+            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "standalone", "competency"])
         with col2:
             difficulty = st.selectbox("Difficulty", ["beginner", "intermediate", "advanced"], index=1)
         with col3:
@@ -111,7 +113,16 @@ with tab_gen:
                 
         with adv2:
             st.write("")
-        
+
+        if assessment_type == "competency":
+            st.markdown("#### Competency Focus (required for competency type)")
+            st.caption("Leave Course IDs blank to generate purely from KCM descriptions (no course content needed).")
+            comp_area = st.text_input("Competency Area", placeholder="e.g. Behavioural", key="comp_area")
+            comp_themes = st.text_input("Competency Themes (comma-separated)", placeholder="e.g. Service Orientation,Integrity", key="comp_themes")
+            comp_sub_themes = st.text_input("Competency Sub-Themes (comma-separated)", placeholder="e.g. Citizen Centricity,Empathy", key="comp_sub_themes")
+        else:
+            comp_area = comp_themes = comp_sub_themes = None
+
         uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
 
     if st.button("Start Generation", type="primary"):
@@ -124,8 +135,7 @@ with tab_gen:
         q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "multichoice": multi, "truefalse": tf}
         
         payload = {
-            'course_ids': course_ids_input,
-            'force': 'true' if force_new else 'false', 
+            'force': 'true' if force_new else 'false',
             'assessment_type': assessment_type,
             'difficulty': difficulty,
             'total_questions': sum(q_counts.values()),
@@ -133,16 +143,28 @@ with tab_gen:
             'language': language,
             'enable_blooms': 'true' if enable_blooms else 'false'
         }
+        if course_ids_input and course_ids_input.strip():
+            payload['course_ids'] = course_ids_input
         
         if enable_blooms and blooms_config:
             payload['blooms_config'] = json.dumps(blooms_config)
         
         if course_weightage and course_weightage.strip():
             payload['course_weightage'] = course_weightage.strip()
+
+        if course_names_input and course_names_input.strip():
+            payload['course_names'] = [n.strip() for n in course_names_input.split(",") if n.strip()]
         
         if time_limit > 0:
             payload['time_limit'] = time_limit
-        
+
+        if comp_area:
+            payload['competency_area'] = comp_area
+        if comp_themes:
+            payload['competency_themes'] = [t.strip() for t in comp_themes.split(",") if t.strip()]
+        if comp_sub_themes:
+            payload['competency_sub_themes'] = [s.strip() for s in comp_sub_themes.split(",") if s.strip()]
+
         files = []
         if uploaded_files:
             for f in uploaded_files:
@@ -180,26 +202,28 @@ with tab_comp:
     
     # Dynamic Course Inputs
     if "comp_courses" not in st.session_state:
-        st.session_state.comp_courses = [{"id": "", "weight": 50}, {"id": "", "weight": 50}]
-        
+        st.session_state.comp_courses = [{"id": "", "name": "", "weight": 50}, {"id": "", "name": "", "weight": 50}]
+
     st.markdown("#### Input Courses & Weights")
-    
+
     course_data = []
     total_weight = 0
     for i, course in enumerate(st.session_state.comp_courses):
-        col1, col2, col3 = st.columns([5, 2, 1])
+        col1, col2, col3, col4 = st.columns([4, 4, 2, 1])
         with col1:
             c_id = st.text_input(f"Course ID {i+1}", value=course["id"], key=f"cid_{i}")
         with col2:
-            c_w = st.number_input(f"Weight (%)", min_value=1, max_value=100, value=course["weight"], key=f"cw_{i}")
+            c_name = st.text_input(f"Course Name {i+1}", value=course.get("name", ""), placeholder="e.g. Ethics in Governance", key=f"cname_{i}")
         with col3:
-            st.write("") # Spacing
+            c_w = st.number_input(f"Weight (%)", min_value=1, max_value=100, value=course["weight"], key=f"cw_{i}")
+        with col4:
+            st.write("")
             st.write("")
             if st.button("🗑️", key=f"del_{i}"):
                 st.session_state.comp_courses.pop(i)
                 st.rerun()
-                
-        course_data.append({"id": c_id, "weight": c_w})
+
+        course_data.append({"id": c_id, "name": c_name, "weight": c_w})
         total_weight += c_w
         
     if st.button("➕ Add Another Course"):
@@ -268,12 +292,13 @@ with tab_comp:
             st.stop()
             
         c_ids = [c["id"].strip() for c in valid_courses]
+        c_names = [c.get("name", "").strip() for c in valid_courses]
         c_weights = {c["id"].strip(): c["weight"] for c in valid_courses}
-        
+
         comp_q_counts = {"mcq": cmcq, "ftb": cftb, "mtf": cmtf, "multichoice": cmulti, "truefalse": ctf}
         comp_payload = {
             'course_ids': ",".join(c_ids),
-            'force': 'true' if force_new else 'false', 
+            'force': 'true' if force_new else 'false',
             'assessment_type': 'comprehensive',
             'difficulty': comp_diff,
             'total_questions': total_q,
@@ -282,6 +307,8 @@ with tab_comp:
             'enable_blooms': 'true' if comp_enable_blooms else 'false',
             'course_weightage': json.dumps(c_weights)
         }
+        if any(c_names):
+            comp_payload['course_names'] = [n for n in c_names if n]
         
         if comp_enable_blooms and comp_blooms_config:
             comp_payload['blooms_config'] = json.dumps(comp_blooms_config)
@@ -337,11 +364,13 @@ with tab_view:
         if status == "COMPLETED":
             # Downloads — token sent in header, not URL query param
             st.markdown("### 📥 Downloads")
-            d1, d2, d3 = st.columns(3)
+            d1, d2, d3, d4, d5 = st.columns(5)
             for fmt, col, label, mime in [
-                ("csv",  d1, "Download CSV",  "text/csv"),
-                ("json", d2, "Download JSON", "application/json"),
-                ("pdf",  d3, "Download PDF",  "application/pdf"),
+                ("csv",       d1, "Download CSV",       "text/csv"),
+                ("csv_basic", d2, "Download CSV Basic", "text/csv"),
+                ("json",      d3, "Download JSON",      "application/json"),
+                ("pdf",       d4, "Download PDF",       "application/pdf"),
+                ("docx",      d5, "Download DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             ]:
                 try:
                     dl_resp = requests.get(
@@ -350,7 +379,8 @@ with tab_view:
                         headers=get_headers(),
                     )
                     if dl_resp.status_code == 200:
-                        col.download_button(label, dl_resp.content, file_name=f"assessment_{job_id}.{fmt}", mime=mime)
+                        ext = "csv" if fmt == "csv_basic" else fmt
+                        col.download_button(label, dl_resp.content, file_name=f"assessment_{job_id}_{fmt}.{ext}", mime=mime)
                     else:
                         col.error(f"{fmt.upper()} failed ({dl_resp.status_code})")
                 except Exception as e:
@@ -533,10 +563,12 @@ with tab_history:
                             st.success(f"Job {job_id} loaded! Switch to 'View & Edit Result' tab.")
                         
                         # Downloads — token sent in header, not URL query param
-                        dl_col1, dl_col2 = st.columns(2)
+                        dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
                         for fmt, col, label, mime in [
-                            ("csv", dl_col1, "CSV", "text/csv"),
-                            ("pdf", dl_col2, "PDF", "application/pdf"),
+                            ("csv",       dl_col1, "CSV",       "text/csv"),
+                            ("csv_basic", dl_col2, "CSV Basic", "text/csv"),
+                            ("pdf",       dl_col3, "PDF",       "application/pdf"),
+                            ("docx",      dl_col4, "DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
                         ]:
                             try:
                                 dl_r = requests.get(
@@ -545,7 +577,8 @@ with tab_history:
                                     headers=get_headers(),
                                 )
                                 if dl_r.status_code == 200:
-                                    col.download_button(f"Download {label}", dl_r.content, file_name=f"assessment_{job_id}.{fmt}", mime=mime, key=f"dl_{fmt}_{job_id}")
+                                    ext = "csv" if fmt == "csv_basic" else fmt
+                                    col.download_button(f"Download {label}", dl_r.content, file_name=f"assessment_{job_id}_{fmt}.{ext}", mime=mime, key=f"dl_{fmt}_{job_id}")
                                 else:
                                     col.error(f"{label} failed ({dl_r.status_code})")
                             except Exception as e:

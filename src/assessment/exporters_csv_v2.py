@@ -1,5 +1,6 @@
 
 import csv
+import re
 from typing import Dict, List, Any
 from pathlib import Path
 
@@ -11,11 +12,9 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
     """
     
     # Define Header
-    headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging", "Learning Objective"]
+    headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging"]
     for i in range(1, 8):
         headers.extend([f"Option{i}", f"isOption{i}Correct"])
-    headers.extend(["Explanation", "Why Factor", "Logic Justification"])
-    headers.extend(["Bloom's Level", "Relevance %", "Competency", "Rationale"])
         
     rows = []
     questions_obj = assessment_data.get("questions", {})
@@ -44,7 +43,9 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
     for item in all_questions:
         q = item["raw"]
         q_type = item["type"]
-        tagging = q.get("course_name", "N/A") # Fallback if not comprehensive / LLM fails
+        difficulty_map = {"easy": "Easy", "medium": "Medium", "intermediate": "Medium", "hard": "Difficult", "difficult": "Difficult", "advanced": "Difficult"}
+        raw_diff = str(q.get("difficulty_level", "")).lower()
+        tagging = difficulty_map.get(raw_diff, "Medium")
         
         default_q_txt = "" 
         if q_type == "MTF":
@@ -52,12 +53,15 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
             context = q.get("matching_context", "Match the following items appropriately:")
             default_q_txt = f"{context}\n\n" if context else "Match the following items appropriately:\n\n"
         
+        q_text = q.get("question_text", default_q_txt)
+        if q_type == "FTB":
+            q_text = re.sub(r'_{2,}', '<blank>', q_text)
+
         row = {
             "QuestionNo": q_counter,
             "QuestionType": q_type,
-            "Question": q.get("question_text", f"{default_q_txt}"),
+            "Question": q_text,
             "QuestionTagging": tagging,
-            "Learning Objective": q.get("reasoning", {}).get("learning_objective_alignment", "")
         }
         
         # Override the MTF string to only contain the context since it lacks a QuestionText itself
@@ -84,23 +88,13 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
             elif correct_idx is not None:
                 correct_set = {int(correct_idx)}
                 
-            for i, opt in enumerate(options[:7]): # Max 7 options
+            for i, opt in enumerate(options[:7]):
                 col_idx = i + 1
                 row[f"Option{col_idx}"] = opt.get("text", "")
-                # Check if this index (i+1 if 1-based, i if 0-based) is correct.
-                # Assuming internal schema correct_option_index matches Option List order.
-                # Internal usually 0-based in list.
-                # User example: OptionIndex 2 => "Option2" col? No example shows "Option2" Correct=Yes.
-                # Wait, internal representation depends on generator prompts. 
-                # Let's assume options list index 0 matches Option1 column.
-                
-                is_correct = "Yes" if (i+1) in correct_set else "No" 
-                # Wait, careful. If generator says correct_index=2. Is that the 2nd item? list[1]? Or list[2]?
-                # Usually prompts return 1-based "Option 2".
-                # Let's assume 1-based to be safe with LLM outputs, but wait, options list is python list (0-based).
-                # If LLM says "Correct: 2", it usually means the 2nd option.
-                
-                is_correct = "Yes" if (i+1) in correct_set else "No"
+                # Match using the option's own index field (LLM-assigned),
+                # falling back to 1-based position if index field is missing
+                opt_index = int(opt["index"]) if opt.get("index") is not None else col_idx
+                is_correct = "Yes" if opt_index in correct_set else "No"
                 row[f"isOption{col_idx}Correct"] = is_correct
 
         elif q_type == "T/F":
@@ -153,28 +147,70 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
                  row["Option1"] = str(correct_ans)
                  row["isOption1Correct"] = "Blank1"
 
-        # Add Rationale (answer_rationale)
-        rationale = q.get("answer_rationale", {})
-        row["Rationale"] = rationale.get("correct_answer_explanation", "")
-        row["Why Factor"] = rationale.get("why_factor", "")
-        row["Logic Justification"] = rationale.get("logic_justification", "")
-
-        # Add Reasoning (reasoning context)
-        reasoning = q.get("reasoning", {})
-        kcm = reasoning.get("competency_alignment", {}).get("kcm", {})
-
-        row["Bloom's Level"] = q.get("blooms_level", "")
-        row["Relevance %"] = q.get("relevance_percentage", "")
-
-        competency_str = ""
-        if kcm.get("competency_area") and kcm.get("competency_theme"):
-            competency_str = f"{kcm.get('competency_area')} - {kcm.get('competency_theme')}"
-        row["Competency"] = competency_str
-
         rows.append(row)
         q_counter += 1
 
     # Write CSV
+    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
+    """
+    Basic CSV export — MCQ only (SCA + MCA), no QuestionType/QuestionTagging columns.
+    Columns: SR, Question, Option1..Option6, IsOption1Correct..IsOption6Correct
+    IsOptionNCorrect values: TRUE / FALSE
+    """
+    headers = ["SR", "Question"]
+    for i in range(1, 7):
+        headers.extend([f"Option{i}", f"IsOption{i}Correct"])
+
+    rows = []
+    questions_obj = assessment_data.get("questions", {})
+    q_counter = 1
+
+    all_questions = []
+    for q_type, q_list in questions_obj.items():
+        if q_type == "Multiple Choice Question":
+            csv_type = "MCQ-SCA"
+        elif q_type == "Multi-Choice Question":
+            csv_type = "MCQ-MCA"
+        else:
+            continue  # only MCQ types included
+        for q in q_list:
+            all_questions.append({"raw": q, "type": csv_type})
+
+    for item in all_questions:
+        q = item["raw"]
+        q_type = item["type"]
+
+        q_text = q.get("question_text", "")
+
+        row = {"SR": q_counter, "Question": q_text}
+
+        for i in range(1, 7):
+            row[f"Option{i}"] = ""
+            row[f"IsOption{i}Correct"] = ""
+
+        options = q.get("options", [])
+        correct_idx = q.get("correct_option_index")
+        correct_set = set()
+        if isinstance(correct_idx, list):
+            correct_set = {int(x) for x in correct_idx}
+        elif correct_idx is not None:
+            correct_set = {int(correct_idx)}
+
+        for i, opt in enumerate(options[:6]):
+            col_idx = i + 1
+            row[f"Option{col_idx}"] = opt.get("text", "")
+            opt_index = int(opt["index"]) if opt.get("index") is not None else col_idx
+            row[f"IsOption{col_idx}Correct"] = "TRUE" if opt_index in correct_set else "FALSE"
+
+        rows.append(row)
+        q_counter += 1
+
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
