@@ -122,36 +122,38 @@ def generate_html_content(assessment_data: dict) -> str:
             """
             
             # Options / Body
+            ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
             if q_type == "Multiple Choice Question":
                 options = q.get("options", [])
-                opts_html = "".join([f"<li>- {o.get('text', '')}</li>" for o in options])
+                opts_html = "".join([f"<li>{ALPHA[i]}. {o.get('text', '')}</li>" for i, o in enumerate(options)])
                 correct_idx = q.get('correct_option_index')
                 correct_set = {int(correct_idx)} if correct_idx is not None else set()
                 correct_labels = [
-                    f"Option {i+1}" for i, o in enumerate(options)
-                    if (int(o["index"]) if o.get("index") is not None else i+1) in correct_set
+                    ALPHA[i] for i, o in enumerate(options)
+                    if (int(o["index"]) if o.get("index") is not None else i) in correct_set
                 ]
                 q_html += f"<ul class='options-list'>{opts_html}</ul>"
                 q_html += f"<div class='correct'>Correct Answer: {correct_labels[0] if correct_labels else 'N/A'}</div>"
 
             elif q_type == "MTF Question":
-                pairs_html = "".join([f"<li>- {p.get('left')} &rarr; {p.get('right')}</li>" for p in q.get("pairs", [])])
+                pairs_html = "".join([f"<li>{ALPHA[i]}. {p.get('left')} &rarr; {p.get('right')}</li>" for i, p in enumerate(q.get("pairs", []))])
                 q_html += f"<ul class='options-list'>{pairs_html}</ul>"
 
             elif q_type == "Multi-Choice Question":
                 options = q.get("options", [])
-                opts_html = "".join([f"<li>[ ] {o.get('text', '')}</li>" for o in options])
+                opts_html = "".join([f"<li>{ALPHA[i]}. {o.get('text', '')}</li>" for i, o in enumerate(options)])
                 corr = q.get('correct_option_index')
                 correct_set = {int(x) for x in corr} if isinstance(corr, list) else ({int(corr)} if corr is not None else set())
                 correct_labels = [
-                    f"Option {i+1}" for i, o in enumerate(options)
-                    if (int(o["index"]) if o.get("index") is not None else i+1) in correct_set
+                    ALPHA[i] for i, o in enumerate(options)
+                    if (int(o["index"]) if o.get("index") is not None else i) in correct_set
                 ]
                 q_html += f"<ul class='options-list'>{opts_html}</ul>"
                 q_html += f"<div class='correct'>Correct Options: {', '.join(correct_labels) if correct_labels else 'N/A'}</div>"
-            
+
             elif q_type == "True/False Question":
-                q_html += "<ul class='options-list'><li>- True</li><li>- False</li></ul>"
+                q_html += "<ul class='options-list'><li>A. True</li><li>B. False</li></ul>"
                 q_html += f"<div class='correct'>Correct Answer: {q.get('correct_answer')}</div>"
             
             else:
@@ -165,6 +167,7 @@ def generate_html_content(assessment_data: dict) -> str:
                 <div class="reasoning-box">
                     <b>Rationale:</b> {ar.get('correct_answer_explanation', 'N/A')}<br/>
                     <b>Bloom's Level:</b> {q.get('blooms_level', 'N/A')} ({rs.get('blooms_level_justification', 'N/A')})<br/>
+                    <b>Learning Objective:</b> {rs.get('learning_objective_alignment', 'N/A')}<br/>
                     <b>Competency:</b> {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}<br/>
                     <b>Relevance:</b> {q.get('relevance_percentage', 'N/A')}%
                 </div>
@@ -232,39 +235,41 @@ def generate_docx(assessment_data: dict, output_path: Path):
             c_para = doc.add_paragraph()
             c_para.add_run(f"Source Course: {q.get('course_name', 'N/A')}").italic = True
 
+            ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
             if q_type == "Multiple Choice Question":
                 options = q.get("options", [])
-                for opt in options:
-                    doc.add_paragraph(f"- {opt.get('text', '')}", style='List Bullet')
+                for i, opt in enumerate(options):
+                    doc.add_paragraph(f"{ALPHA[i]}. {opt.get('text', '')}", style='List Bullet')
                 correct_idx = q.get('correct_option_index')
                 correct_set = {int(correct_idx)} if correct_idx is not None else set()
                 correct_labels = [
-                    f"Option {i+1}" for i, o in enumerate(options)
-                    if (int(o["index"]) if o.get("index") is not None else i+1) in correct_set
+                    ALPHA[i] for i, o in enumerate(options)
+                    if (int(o["index"]) if o.get("index") is not None else i) in correct_set
                 ]
                 p = doc.add_paragraph()
                 p.add_run(f"Correct Answer: {correct_labels[0] if correct_labels else 'N/A'}").bold = True
 
             elif q_type == "MTF Question":
-                for p_item in q.get("pairs", []):
-                    doc.add_paragraph(f"- {p_item.get('left')} -> {p_item.get('right')}", style='List Bullet')
+                for i, p_item in enumerate(q.get("pairs", [])):
+                    doc.add_paragraph(f"{ALPHA[i]}. {p_item.get('left')} -> {p_item.get('right')}", style='List Bullet')
 
             elif q_type == "Multi-Choice Question":
                 options = q.get("options", [])
-                for opt in options:
-                    doc.add_paragraph(f"[ ] {opt.get('text', '')}", style='List Bullet')
+                for i, opt in enumerate(options):
+                    doc.add_paragraph(f"{ALPHA[i]}. {opt.get('text', '')}", style='List Bullet')
                 corr = q.get('correct_option_index')
                 correct_set = {int(x) for x in corr} if isinstance(corr, list) else ({int(corr)} if corr is not None else set())
                 correct_labels = [
-                    f"Option {i+1}" for i, o in enumerate(options)
-                    if (int(o["index"]) if o.get("index") is not None else i+1) in correct_set
+                    ALPHA[i] for i, o in enumerate(options)
+                    if (int(o["index"]) if o.get("index") is not None else i) in correct_set
                 ]
                 p = doc.add_paragraph()
                 p.add_run(f"Correct Options: {', '.join(correct_labels) if correct_labels else 'N/A'}").bold = True
 
             elif q_type == "True/False Question":
-                 doc.add_paragraph(f"- True", style='List Bullet')
-                 doc.add_paragraph(f"- False", style='List Bullet')
+                 doc.add_paragraph("A. True", style='List Bullet')
+                 doc.add_paragraph("B. False", style='List Bullet')
                  p = doc.add_paragraph()
                  p.add_run(f"Correct Answer: {q.get('correct_answer')}").bold = True
             
@@ -282,6 +287,9 @@ def generate_docx(assessment_data: dict, output_path: Path):
 
             blooms_para = doc.add_paragraph()
             blooms_para.add_run(f"Bloom's: {q.get('blooms_level', 'N/A')} ({reasoning.get('blooms_level_justification', 'N/A')}) | Relevance: {q.get('relevance_percentage', 'N/A')}%")
+
+            lo_para = doc.add_paragraph()
+            lo_para.add_run(f"Learning Objective: {reasoning.get('learning_objective_alignment', 'N/A')}")
 
             comp_para = doc.add_paragraph()
             comp_para.add_run(f"Competency: {kcm.get('competency_area', 'N/A')} - {kcm.get('competency_theme', 'N/A')}")
