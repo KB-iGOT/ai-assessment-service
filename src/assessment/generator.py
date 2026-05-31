@@ -11,7 +11,7 @@ from typing import Dict, Any, Tuple, Optional, List
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ServerError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_exception
 
 from .config import (
     DATABASE_URL,
@@ -408,8 +408,20 @@ def build_prompt(
 
     return prompt
 
+def _should_retry(e: BaseException) -> bool:
+    if isinstance(e, (ServerError, asyncio.TimeoutError)):
+        return True
+    # Retry cache-related errors (expired or not found) — the except block in
+    # call_llm resets _active_kcm_cache so the next attempt recreates it.
+    # Vertex returns 404 ("not found") or 400 ("expired") depending on the model.
+    if isinstance(e, ClientError):
+        msg = str(e).lower()
+        if "cache" in msg and ("expired" in msg or "404" in msg or "not found" in msg):
+            return True
+    return False
+
 @retry(
-    retry=retry_if_exception_type((ServerError, asyncio.TimeoutError)),
+    retry=retry_if_exception(_should_retry),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     reraise=True,
