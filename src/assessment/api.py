@@ -3,7 +3,7 @@ import shutil
 import logging
 import json
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional
 from fastapi import FastAPI, BackgroundTasks, UploadFile, File, Form, HTTPException, APIRouter
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.openapi.utils import get_openapi
@@ -145,7 +145,7 @@ async def generate_v1(
     competency_themes: Optional[List[str]] = Form(None, description="Competency themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     competency_sub_themes: Optional[List[str]] = Form(None, description="Competency sub-themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     additional_instructions: Optional[str] = Form(""),
-    files: Optional[List[Union[UploadFile, str]]] = File(None)
+    files: Optional[List[UploadFile]] = File(None)
 ):
     """
     V2 Generation Endpoint:
