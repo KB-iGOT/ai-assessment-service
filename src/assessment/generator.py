@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError, ServerError
+from google.genai.errors import APIError, ServerError, ClientError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_exception
 
 from .config import (
