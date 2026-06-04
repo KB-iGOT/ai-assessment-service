@@ -325,7 +325,11 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
         "mtf": 0,
         "truefalse": 0,
         "multichoice": 0
-      }
+      },
+      "topic_names": ["Public Policy Fundamentals"],
+      "blooms_config": {"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 10, "Evaluate": 10, "Create": 0},
+      "enable_blooms": true,
+      "additional_instructions": null
     },
     "error_message": null
   }
@@ -342,7 +346,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 | `updated_at` | ISO 8601 timestamp of the last status change |
 | `course_ids` | List of iGOT course IDs the assessment was generated from. |
 | `course_names` | List of course names corresponding to `course_ids`. Multiple entries for comprehensive assessments. |
-| `config` | The parameters used when this assessment was generated (language, difficulty, types, etc.) |
+| `config` | The parameters used when this assessment was generated. Includes: `language`, `difficulty`, `assessment_type`, `total_questions`, `question_type_counts`, `time_limit`, `course_weightage`, `competency_area`, `competency_themes`, `competency_sub_themes`, `topic_names`, `blooms_config`, `enable_blooms`, `additional_instructions`. |
 | `error_message` | `null` on success. Error detail if `status` is `FAILED`. |
 
 ---
