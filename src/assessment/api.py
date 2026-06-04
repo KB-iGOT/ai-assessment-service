@@ -294,6 +294,10 @@ async def generate_v1(
             "competency_area": competency_area,
             "competency_themes": parsed_competency_themes,
             "competency_sub_themes": parsed_competency_sub_themes,
+            "topic_names": t_names,
+            "blooms_config": b_dist,
+            "enable_blooms": enable_blooms,
+            "additional_instructions": additional_instructions,
         }
     }
     await create_job(user_job_id, user_id=user_id, metadata=initial_metadata)
