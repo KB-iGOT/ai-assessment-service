@@ -93,15 +93,8 @@ def generate_html_content(assessment_data: dict) -> str:
         
         <p><b>Assessment Scope:</b> %s</p>
         
-        <h3>Audit Information</h3>
-        <table class="audit-table">
-            <tr><th>Field</th><th>Value</th></tr>
-            <tr><td>Prompt Version</td><td>%s</td></tr>
-            <tr><td>API Version</td><td>%s</td></tr>
-        </table>
-        
         <h2>Questions & Reasoning</h2>
-    """ % (font_faces, font_stack, scope, prompt_ver, api_ver)]
+    """ % (font_faces, font_stack, scope)]
 
     # Dynamic Questions
     q_counter = 1
@@ -199,21 +192,6 @@ def generate_docx(assessment_data: dict, output_path: Path):
 
     blueprint = assessment_data.get("blueprint", {})
     doc.add_paragraph(f"Assessment Scope: {blueprint.get('assessment_scope_summary', 'N/A')}")
-    
-    # Audit Table
-    table = doc.add_table(rows=1, cols=2)
-    table.style = 'Table Grid'
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'Field'
-    hdr_cells[1].text = 'Value'
-    
-    row_cells = table.add_row().cells
-    row_cells[0].text = 'Prompt Version'
-    row_cells[1].text = str(blueprint.get("prompt_version", "N/A"))
-    
-    row_cells = table.add_row().cells
-    row_cells[0].text = 'API Version'
-    row_cells[1].text = str(blueprint.get("api_version", "N/A"))
     
     doc.add_heading('Questions & Reasoning', level=1)
     
