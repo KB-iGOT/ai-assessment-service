@@ -116,6 +116,10 @@ async def process_job(payload: Dict[str, Any]):
             "competency_area": payload.get('competency_area'),
             "competency_themes": payload.get('competency_themes'),
             "competency_sub_themes": payload.get('competency_sub_themes'),
+            "topic_names": payload.get('topic_names'),
+            "blooms_config": payload.get('blooms_distribution'),
+            "enable_blooms": payload.get('enable_blooms'),
+            "additional_instructions": payload.get('additional_instructions'),
         }
 
         # 6. Save Result
