@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     libgobject-2.0-0 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
-
+    
 # Copy packaging files + source BEFORE pip install
 COPY pyproject.toml .
 COPY src ./src
@@ -29,10 +29,13 @@ COPY . .
 # Create directory for course data
 RUN mkdir -p interactive_courses_data
 
+# Create non-root user and give ownership of /app
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && chown -R appuser:appuser /app
+    
+USER appuser
+
 # Expose port for FastAPI
 EXPOSE 8000
-
 ENV PYTHONPATH=/app/src
-
 CMD ["uvicorn", "assessment.api:app", "--host", "0.0.0.0", "--port", "8000"]
-
