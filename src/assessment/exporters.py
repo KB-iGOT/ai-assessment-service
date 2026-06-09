@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from annotated_types import doc
 from docx import Document
 from docx.shared import Pt, Inches
 
@@ -19,6 +20,11 @@ for logger_name in ["weasyprint", "fontTools", "fontTools.subset", "fontTools.tt
 
 RESOURCE_DIR = Path(__file__).parent / "resources" / "fonts"
 
+DISPLAY_LABELS = {
+    "Multiple Choice Question": "Single selection MCQs",
+    "Multi-Choice Question": "Multiple selection MCQs",
+}
+
 def get_css_font_faces() -> str:
     """Generates CSS @font-face rules for all available Noto fonts."""
     font_map = {
@@ -30,6 +36,11 @@ def get_css_font_faces() -> str:
         "NotoSansBengali-Regular.ttf": "NotoSansBengali",
         "NotoSansGujarati-Regular.ttf": "NotoSansGujarati",
         "NotoSansGurmukhi-Regular.ttf": "NotoSansGurmukhi"
+    }
+    
+    DISPLAY_LABELS = {
+        "Multiple Choice Question": "Single selection MCQs",
+        "Multi-Choice Question": "Multiple selection MCQs",
     }
     
     css = []
@@ -99,7 +110,8 @@ def generate_html_content(assessment_data: dict) -> str:
     # Dynamic Questions
     q_counter = 1
     for q_type, q_list in questions_obj.items():
-        html_parts.append(f"<h3>{q_type} ({len(q_list)})</h3>")
+        display_label = DISPLAY_LABELS.get(q_type, q_type)
+        html_parts.append(f"<h3>{display_label} ({len(q_list)})</h3>")
         
         for q in q_list:
             if q_type == "MTF Question":
@@ -188,7 +200,6 @@ def generate_pdf(assessment_data: dict, output_path: Path):
 def generate_docx(assessment_data: dict, output_path: Path):
     """Generates a DOCX report from the assessment JSON data."""
     doc = Document()
-    doc.add_heading('Course Assessment Report', 0)
 
     blueprint = assessment_data.get("blueprint", {})
     doc.add_paragraph(f"Assessment Scope: {blueprint.get('assessment_scope_summary', 'N/A')}")
@@ -198,7 +209,8 @@ def generate_docx(assessment_data: dict, output_path: Path):
     questions_obj = assessment_data.get("questions", {})
     
     for q_type, q_list in questions_obj.items():
-        doc.add_heading(f"{q_type} ({len(q_list)})", level=2)
+        display_label = DISPLAY_LABELS.get(q_type, q_type)
+        doc.add_heading(f"{display_label} ({len(q_list)})", level=2)
         
         for i, q in enumerate(q_list, 1):
             if q_type == "MTF Question":
