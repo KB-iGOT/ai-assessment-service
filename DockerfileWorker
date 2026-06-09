@@ -29,9 +29,13 @@ COPY . .
 # Create directory for course data
 RUN mkdir -p interactive_courses_data
 
+# Create non-root user and give ownership of /app
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
 # Expose port for FastAPI
 EXPOSE 8005
-
 ENV PYTHONPATH=/app/src
-
 CMD ["python", "-m", "assessment.worker_service"]
