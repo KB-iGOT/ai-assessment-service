@@ -27,6 +27,11 @@ if not auth_token:
 force_new = st.sidebar.checkbox("Bypass Cache (Force New)", value=False)
 
 # Headers helper
+DISPLAY_LABELS = {
+    "Multiple Choice Question": "Single selection MCQs",
+    "Multi-Choice Question": "Multiple selection MCQs",
+}
+
 def get_headers():
     return {
         "x-authenticated-user-token": auth_token,
@@ -402,7 +407,7 @@ with tab_view:
                 new_questions_data = {}
                 
                 for q_type, q_list in questions.items():
-                    st.markdown(f"**{q_type}**")
+                    st.markdown(f"**{DISPLAY_LABELS.get(q_type, q_type)}**")
                     new_q_list = []
                     for i, q in enumerate(q_list):
                         qk = f"{q_type}_{i}"
