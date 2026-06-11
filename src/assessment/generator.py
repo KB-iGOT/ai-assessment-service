@@ -460,12 +460,15 @@ def _should_retry(e: BaseException) -> bool:
         msg = str(e).lower()
         if "cache" in msg and ("expired" in msg or "404" in msg or "not found" in msg):
             return True
+        # Retry 429 RESOURCE_EXHAUSTED — Vertex AI rate limit hit under concurrent load.
+        if "429" in msg or "resource_exhausted" in msg:
+            return True
     return False
 
 @retry(
     retry=retry_if_exception(_should_retry),
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
+    wait=wait_exponential(multiplier=2, min=5, max=30),
     reraise=True,
 )
 async def call_llm(prompt: str) -> Tuple[str, Dict[str, Any]]:
