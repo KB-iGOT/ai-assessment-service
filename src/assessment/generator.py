@@ -93,42 +93,19 @@ def compute_blooms_by_type(
     question_type_counts: Dict[str, int],
 ) -> Dict[str, List[str]]:
     """
-    Distributes Bloom's levels across question types respecting both the requested
-    percentage distribution AND each type's cognitive ceiling.
+    Converts bloom % distribution into exact per-type level lists.
+    No ceiling restrictions — only the user's percentages and question counts matter.
 
-    Cognitive ceilings (structural limits of each format):
-      truefalse  → max Understand  (binary choice can't go beyond comprehension)
-      ftb        → max Apply       (recall/apply a term; synthesis is unnatural)
-      mtf        → max Analyze     (matching relationships; evaluation/creation unnatural)
-      multichoice / mcq → all levels
-
-    Algorithm:
-      1. Compute total count per Bloom's level from percentages (largest-remainder).
-      2. Build a pool sorted highest→lowest level.
-      3. Assign types from highest-ceiling to lowest — each type takes what it can
-         absorb from the remaining pool.
-      4. Any overflow (levels a type can't absorb) is redirected to the next
-         highest-ceiling type that still has capacity.
-      5. Shuffle the assigned list per type so the LLM doesn't see a monotone sequence.
+    1. Convert percentages to integer counts (largest-remainder, sums to total).
+    2. Build a flat pool of levels (shuffled).
+    3. Distribute pool round-robin across types so each type gets a proportional mix.
     """
     BLOOM_ORDER = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"]
-    BLOOM_RANK = {l: i for i, l in enumerate(BLOOM_ORDER)}
-
-    # Cognitive ceiling per type (highest level index the type can handle)
-    TYPE_CEILING: Dict[str, int] = {
-        "truefalse":   BLOOM_RANK["Understand"],
-        "ftb":         BLOOM_RANK["Apply"],
-        "mtf":         BLOOM_RANK["Analyze"],
-        "multichoice": BLOOM_RANK["Create"],
-        "mcq":         BLOOM_RANK["Create"],
-    }
 
     active_types = [t for t in question_type_counts if question_type_counts.get(t, 0) > 0]
-    active_types.sort(key=lambda t: -TYPE_CEILING.get(t, 0))
+    total = sum(question_type_counts[t] for t in active_types)
 
-    total = sum(question_type_counts.get(t, 0) for t in active_types)
-
-    # Step 1: compute count per Bloom level (largest-remainder method)
+    # Step 1: percentage → integer counts (largest-remainder)
     active_levels = {k: v for k, v in blooms_distribution.items() if v > 0}
     items = sorted(active_levels.items(), key=lambda x: -x[1])
     level_counts: Dict[str, int] = {}
@@ -144,53 +121,21 @@ def compute_blooms_by_type(
         if remaining <= 0:
             break
 
-    # Step 2: build a mutable counter of available slots per level
-    available: Dict[str, int] = {l: level_counts.get(l, 0) for l in BLOOM_ORDER}
-
-    # Step 3: for each type (highest ceiling first), greedily assign levels that fit.
-    # Levels above a type's ceiling are NEVER clamped — they stay in the pool and are
-    # absorbed by the highest-ceiling types (MCQ/MultiChoice) which have no restriction.
-    # This preserves the exact level distribution regardless of question type mix.
-    result: Dict[str, List[str]] = {t: [] for t in active_types}
-
-    for t in active_types:
-        ceiling = TYPE_CEILING.get(t, BLOOM_RANK["Create"])
-        needed = question_type_counts[t]
-        assigned: List[str] = []
-
-        # Take levels highest-first that fit within this type's ceiling
-        for level in reversed(BLOOM_ORDER):
-            if len(assigned) >= needed:
-                break
-            if BLOOM_RANK[level] > ceiling:
-                continue
-            take = min(available[level], needed - len(assigned))
-            assigned.extend([level] * take)
-            available[level] -= take
-
-        random.shuffle(assigned)
-        result[t] = assigned
-
-    # Step 4: any levels still in `available` could not be placed in low-ceiling types
-    # (e.g., Create slots when only FTB/TF remain). Redistribute them to the
-    # highest-ceiling types that still have unfilled slots, keeping the label as-is.
+    # Step 2: build flat pool sorted highest→lowest then shuffle
+    pool: List[str] = []
     for level in reversed(BLOOM_ORDER):
-        while available[level] > 0:
-            # Find the type with highest ceiling that has room
-            placed = False
-            for t in active_types:
-                needed = question_type_counts[t]
-                if len(result[t]) < needed:
-                    result[t].append(level)
-                    available[level] -= 1
-                    placed = True
-                    break
-            if not placed:
-                break  # shouldn't happen if total counts are consistent
+        pool.extend([level] * level_counts.get(level, 0))
+    random.shuffle(pool)
 
-    # Re-shuffle after any top-up from step 4
+    # Step 3: distribute round-robin across types
+    result: Dict[str, List[str]] = {t: [] for t in active_types}
+    type_cycle = []
     for t in active_types:
-        random.shuffle(result[t])
+        type_cycle.extend([t] * question_type_counts[t])
+    random.shuffle(type_cycle)
+
+    for t, level in zip(type_cycle, pool):
+        result[t].append(level)
 
     return result
 
@@ -214,6 +159,7 @@ async def generate_assessment(
     competency_area: Optional[str] = None,
     competency_themes: Optional[str] = None,
     competency_sub_themes: Optional[str] = None,
+    course_names: Optional[List[str]] = None,
 ) -> Tuple[Dict, Dict, Dict]:
     """
     Generates assessment for one or multiple courses.
@@ -253,10 +199,15 @@ async def generate_assessment(
     seen_content_hashes = set()
 
     if course_ids:
-        for cid in course_ids:
+        for idx, cid in enumerate(course_ids):
             c_path = base_path / cid
             if not c_path.exists():
                 logger.warning(f"Course folder {cid} not found, skipping.")
+                # If caller supplied a course name, inject it so LLM never outputs N/A
+                fallback_name = (course_names or [])[idx] if course_names and idx < len(course_names) else None
+                if fallback_name:
+                    aggregated_metadata["courses"].append({"name": fallback_name, "identifier": cid})
+                    logger.info(f"Injected fallback course name '{fallback_name}' for {cid}")
                 continue
                 
             # Metadata
