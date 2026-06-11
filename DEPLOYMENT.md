@@ -12,15 +12,25 @@ Create a `.env` file and a `credentials.json` file in the project root.
 
 ### .env file:
 ```bash
-DB_DSN="postgresql://user:pass@db:5432/karmayogi_db"
+DATABASE_URL="postgresql://user:pass@db:5432/karmayogi_db"
 GOOGLE_PROJECT_ID="your-project-id"
 GOOGLE_LOCATION="us-central1"
-GENAI_MODEL_NAME="gemini-2.5-pro"
+GENAI_MODEL_NAME="gemini-2.5-pro"  # or any supported Vertex AI Gemini model
 KARMAYOGI_API_KEY="your-api-key"
+
+# Storage backend for uploaded files — "local" (default) or "gcs"
+# Use "gcs" in Kubernetes/multi-pod deployments where API and Worker run as separate pods
+DOCUMENT_STORAGE_TYPE=local
+GCS_CREDENTIALS="/app/gcs_credentials.json"  # path to GCS service account JSON (only when type=gcs)
+GCS_BUCKET_NAME="your-gcs-bucket-name"       # only when type=gcs
+GCS_UPLOAD_PREFIX="ai-assessments/uploads"   # optional prefix, default shown
 ```
 
 ### credentials.json:
-Place your Google Cloud Service Account key file in the root as `credentials.json`.
+Place your Google Vertex AI service account key file in the root as `credentials.json`.
+
+### gcs_credentials.json:
+Place your GCS service account key file in the root as `gcs_credentials.json`. This is a separate service account with `Storage Object Admin` permissions on the GCS bucket.
 
 ## 3. Deployment Commands
 
@@ -31,7 +41,7 @@ docker-compose up -d --build
 
 ## 4. Verification
 - **Swagger Documentation**: `http://<server-ip>:8000/docs` (Base redirect still works)
-- **API v1 Status**: `http://<server-ip>:8000/ai-assment-generation/v1/status/{course_id}`
+- **API v1 Status**: `http://<server-ip>:8000/ai-assessment-generation/v1/status/{course_id}`
 - **Streamlit UI**: `http://<server-ip>:8501`
 - **Health Check**: `http://<server-ip>:8000/health`
 

@@ -54,3 +54,7 @@ docker-compose
 
 #HTML
 pdf_video_meta.html
+
+
+#credentials
+.creds/

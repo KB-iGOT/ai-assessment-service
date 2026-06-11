@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 from google import genai
 from google.genai import types
-from google.genai.errors import APIError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from google.genai.errors import APIError, ServerError, ClientError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, retry_if_exception
 
 from .config import (
-    DB_DSN,
+    DATABASE_URL,
     GOOGLE_PROJECT_ID, GOOGLE_LOCATION, GENAI_MODEL_NAME, 
     GOOGLE_APPLICATION_CREDENTIALS, PROMPT_VERSION
 )
@@ -90,8 +90,8 @@ async def get_or_create_kcm_cache() -> str:
 async def generate_assessment(
     question_type_counts: Dict[str, int],
     course_folder: Optional[Path] = None, # Deprecated in v3.2, kept for backward compat
-    assessment_type: str = "final", 
-    difficulty_level: str = "Intermediate", 
+    assessment_type: str = "final",
+    difficulty_level: str = "Intermediate",
     total_questions: int = 5,
     time_to_complete: Optional[str] = None,
     additional_instructions: Optional[str] = None,
@@ -102,7 +102,10 @@ async def generate_assessment(
     enable_blooms: bool = True,
     course_weightage: Optional[str] = None,
     time_limit: Optional[int] = None,
-    extra_files: Optional[List[Path]] = None
+    extra_files: Optional[List[Path]] = None,
+    competency_area: Optional[str] = None,
+    competency_themes: Optional[str] = None,
+    competency_sub_themes: Optional[str] = None,
 ) -> Tuple[Dict, Dict, Dict]:
     """
     Generates assessment for one or multiple courses.
@@ -200,12 +203,36 @@ async def generate_assessment(
                  except Exception as e:
                      logger.warning(f"Failed to read PDF {pdf_file}: {e}")
     else:
-        # Dummy Metadata for Custom Uploads
-        aggregated_metadata["courses"].append({
-             "name": "User Uploaded Content", 
-             "code": "CUSTOM_UPLOAD", 
-             "description": "Assessment generated from user provided files (PDF/VTT)."
-         })
+        if assessment_type == "competency" and competency_area:
+            # No course content — build context from KCM descriptions matching the requested area/themes/sub-themes
+            themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
+            sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
+            matched = [
+                entry for entry in KCM_DESCRIPTIONS_FILE
+                if (
+                    entry.get("Area", "").lower() in [t.lower() for t in themes_list] or
+                    entry.get("Label", "").lower() in [s.lower() for s in sub_themes_list]
+                )
+            ]
+            if matched:
+                kcm_content = "\n\n".join([
+                    f"Sub-Theme: {e.get('Label')}\nArea: {e.get('Area')}\nDescription: {e.get('Description')}\nLevels: {json.dumps(e.get('Levels', {}))}"
+                    for e in matched
+                ])
+                combined_transcript.append(f"--- KCM COMPETENCY REFERENCE ---\n{kcm_content}")
+                logger.info(f"Competency-only mode: injected {len(matched)} KCM entries for area='{competency_area}' themes={themes_list} sub_themes={sub_themes_list}")
+            aggregated_metadata["courses"].append({
+                "name": f"Competency Assessment — {competency_area}",
+                "code": "KCM_COMPETENCY",
+                "description": f"Assessment generated from KCM competency framework. Area: {competency_area}, Themes: {', '.join(themes_list)}, Sub-Themes: {', '.join(sub_themes_list)}"
+            })
+        else:
+            # Dummy Metadata for Custom Uploads
+            aggregated_metadata["courses"].append({
+                "name": "User Uploaded Content",
+                "code": "CUSTOM_UPLOAD",
+                "description": "Assessment generated from user provided files (PDF/VTT)."
+            })
 
     # Process Extra Uploaded Files (from API)
     if extra_files:
@@ -258,6 +285,18 @@ async def generate_assessment(
         except Exception as e:
             logger.warning(f"Failed to parse course weightage '{course_weightage}' - falling back to equal distribution. Error: {e}")
 
+    # Build competency focus instruction for competency assessment type
+    competency_focus_instruction = "Not applicable for this assessment type."
+    if assessment_type == "competency" and competency_area:
+        themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
+        sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
+        competency_focus_instruction = (
+            f"Competency Area: {competency_area}\n"
+            f"Competency Themes: {', '.join(themes_list)}\n"
+            f"Competency Sub-Themes: {', '.join(sub_themes_list)}\n"
+            f"ALL questions MUST map to one of the above sub-themes. No other competencies are permitted."
+        )
+
     # 5. Build Prompt
     prompt = build_prompt(
         question_type_counts=question_type_counts,
@@ -273,7 +312,8 @@ async def generate_assessment(
         input_language=input_language,
         topic_names=topics_str,
         blooms_distribution=blooms_str,
-        course_weightage_instruction=course_weightage_instruction
+        course_weightage_instruction=course_weightage_instruction,
+        competency_focus_instruction=competency_focus_instruction,
     )
     
     # 6. Call LLM
@@ -288,9 +328,9 @@ async def generate_assessment(
 
 def build_prompt(
     question_type_counts:Dict[str, int],
-    course_context: str, 
+    course_context: str,
     learning_objectives_str: str,
-    transcript: str, 
+    transcript: str,
     pdf_snippets: str,
     assessment_type: str,
     difficulty_level: str,
@@ -300,7 +340,8 @@ def build_prompt(
     input_language: str,
     topic_names: str,
     blooms_distribution: str,
-    course_weightage_instruction: str
+    course_weightage_instruction: str,
+    competency_focus_instruction: str = "Not applicable for this assessment type.",
 ) -> str:
     prompt_template = ASSESSMENT_PROMPTS.get('system_prompt_template', '')
     
@@ -317,6 +358,7 @@ def build_prompt(
     prompt = prompt.replace("{total_questions_x3}", str(total_questions))
     prompt = prompt.replace("{time_to_complete}", time_to_complete or "Not provided (use standard pacing)")
     prompt = prompt.replace("{course_weightage_instruction}", course_weightage_instruction)
+    prompt = prompt.replace("{competency_focus_instruction}", competency_focus_instruction)
 
     # v3.3 Specifics (Question Types)
     if not question_type_counts:
@@ -366,7 +408,24 @@ def build_prompt(
 
     return prompt
 
-@retry(retry=retry_if_exception_type((Exception, APIError)), stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def _should_retry(e: BaseException) -> bool:
+    if isinstance(e, (ServerError, asyncio.TimeoutError)):
+        return True
+    # Retry cache-related errors (expired or not found) — the except block in
+    # call_llm resets _active_kcm_cache so the next attempt recreates it.
+    # Vertex returns 404 ("not found") or 400 ("expired") depending on the model.
+    if isinstance(e, ClientError):
+        msg = str(e).lower()
+        if "cache" in msg and ("expired" in msg or "404" in msg or "not found" in msg):
+            return True
+    return False
+
+@retry(
+    retry=retry_if_exception(_should_retry),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
 async def call_llm(prompt: str) -> Tuple[str, Dict[str, Any]]:
     global _active_kcm_cache
     if not client:

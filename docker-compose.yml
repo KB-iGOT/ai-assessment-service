@@ -24,7 +24,7 @@ services:
       - kafka
     environment:
       - PYTHONPATH=/app/src
-      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
+      - DATABASE_URL=postgresql://myuser:mypassword@db:5432/karmayogi_db
       - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
       - GOOGLE_LOCATION=${GOOGLE_LOCATION}
       - GENAI_MODEL_NAME=${GENAI_MODEL_NAME}
@@ -32,6 +32,8 @@ services:
       - KARMAYOGI_API_KEY=${KARMAYOGI_API_KEY}
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TOPIC=assessment.lifecycle.events
+      - KAFKA_REQUEST_TOPIC=assessment.request
+      - KAFKA_GROUP_ID=assessment_worker_group
       - DISABLE_AUTH_VERIFICATION=${DISABLE_AUTH_VERIFICATION:-false}
     command: uvicorn assessment.api:app --host 0.0.0.0 --port 8000
 
@@ -45,7 +47,7 @@ services:
       - kafka
     environment:
       - PYTHONPATH=/app/src
-      - DB_DSN=postgresql://myuser:mypassword@db:5432/karmayogi_db
+      - DATABASE_URL=postgresql://myuser:mypassword@db:5432/karmayogi_db
       - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID}
       - GOOGLE_LOCATION=${GOOGLE_LOCATION}
       - GENAI_MODEL_NAME=${GENAI_MODEL_NAME}
@@ -54,6 +56,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - KAFKA_TOPIC=assessment.lifecycle.events
       - KAFKA_REQUEST_TOPIC=assessment.request
+      - KAFKA_GROUP_ID=assessment_worker_group
     command: python -m assessment.worker_service
 
   ui:

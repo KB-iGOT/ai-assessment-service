@@ -1,15 +1,15 @@
 # Course Assessment Generation
 
-An AI-powered, audit-ready assessment generation system built for the **Karmayogi government learning platform**. Powered by **Google Gemini 2.5 Pro**, FastAPI, and Streamlit, the system follows Senior Instructional Designer logic to produce blueprints and questions with full pedagogic reasoning.
+An AI-powered, audit-ready assessment generation system built for the **Karmayogi government learning platform**. Powered by **Google Gemini** via Vertex AI, FastAPI, and Streamlit, the system follows Senior Instructional Designer logic to produce blueprints and questions with full pedagogic reasoning.
 
 ---
 
 ## Features
 
-- **Model**: Powered by `gemini-2.5-pro` via Google Vertex AI.
+- **Model**: Powered by Google Gemini via Vertex AI (configurable via `GENAI_MODEL_NAME`).
 - **V2 Smart Architecture**: JWT Authentication, Clone-on-Request (instant results), and Private Workspaces.
 - **Event-Driven**: Decoupled API (Producer) and Worker (Consumer) via Kafka. Publishes `ASSESSMENT_COMPLETED` events on job completion.
-- **3 Assessment Types**: Practice (Reinforcement), Final (Certification), and Comprehensive (Cross-course).
+- **5 Assessment Types**: Practice (Reinforcement), Final (Certification), Comprehensive (Cross-course), Standalone (uploaded files), and Competency (KCM-focused — works with or without course content, purely from KCM descriptions).
 - **5 Question Types**: MCQ, Fill-in-the-Blank (FTB), Match-the-Following (MTF), Multi-Choice, and True/False.
 - **Multilingual**: Supports 10+ Indian languages (Hindi, Tamil, Telugu, Gujarati, Kannada, Malayalam, Marathi, Odia, Punjabi, Assamese, Bengali).
 - **KCM Alignment**: Maps every question strictly to the **Karmayogi Competency Model** (Behavioural & Functional).
@@ -95,7 +95,8 @@ For the full architecture including sequence diagrams, database schema, and cach
 ### Initial Setup
 1. Clone this repository.
 2. Copy `.env.example` to `.env` and fill in all required values.
-3. Place your Google Cloud Service Account JSON file in the root as `credentials.json`.
+3. Place your Vertex AI service account JSON file in the root as `credentials.json`.
+4. *(Kubernetes / multi-pod only)* Place your GCS service account JSON file in the root as `gcs_credentials.json` and set `GCS_BUCKET_NAME` in `.env`.
 
 ### Method 1: Docker (Recommended)
 
@@ -145,31 +146,33 @@ Copy `.env.example` to `.env` and configure:
 
 | Variable | Description | Example |
 | :--- | :--- | :--- |
-| `DB_DSN` | PostgreSQL connection string | `postgresql://user:pass@db:5432/karmayogi_db` |
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@db:5432/karmayogi_db` |
 | `GOOGLE_PROJECT_ID` | GCP project ID | `my-gcp-project` |
 | `GOOGLE_LOCATION` | Vertex AI region | `us-central1` |
-| `GENAI_MODEL_NAME` | Gemini model name | `gemini-2.5-pro` |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to credentials JSON | `/app/credentials.json` |
+| `GENAI_MODEL_NAME` | Gemini model name | `gemini-2.5-pro` (or any supported Vertex AI Gemini model) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Path to Vertex AI credentials JSON | `/app/credentials.json` |
 | `KARMAYOGI_API_KEY` | iGot Karmayogi JWT token | `eyJhbGci...` |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address | `localhost:29092` |
 | `KAFKA_TOPIC` | Kafka topic name | `assessment.lifecycle.events` |
 | `MAX_CONCURRENCY` | Max parallel generation jobs | `50` |
 | `CLEANUP_RETENTION_DAYS` | Days before auto-deletion | `7` |
 | `DISABLE_AUTH_VERIFICATION` | Bypass JWT check (dev only) | `false` |
+| `DOCUMENT_STORAGE_TYPE` | Storage backend for uploaded files — `local` (default) or `gcs` | `local` |
+| `GCS_CREDENTIALS` | Path to GCS service account JSON (only when `DOCUMENT_STORAGE_TYPE=gcs`) | `/app/gcs_credentials.json` |
+| `GCS_BUCKET_NAME` | GCS bucket name (only when `DOCUMENT_STORAGE_TYPE=gcs`) | `your-bucket-name` |
+| `GCS_UPLOAD_PREFIX` | Path prefix inside the GCS bucket | `ai-assessments/uploads` |
 
 ---
 
-## API Reference (V2) — Recommended
+## API Reference
 
-The V2 API is the production-ready, event-driven iteration. It introduces **Authentication**, **Private Workspaces**, and instant **Cloning**.
+The API is the production-ready, event-driven iteration. It introduces **Authentication**, **Private Workspaces**, and instant **Cloning**.
 
-- **Base URL**: `http://localhost:8000/ai-assment-generation/api/v2`
-- **Authentication**: All V2 endpoints require a valid JWT.
-  - **Header (preferred)**: `x-auth-token: <jwt>`
-  - **Query param (browser downloads)**: `?token=<jwt>`
+- **Base URL**: `http://localhost:8000/ai-assessments/v1`
+- **Authentication**: All endpoints require a valid JWT via the `x-authenticated-user-token` header.
 
 ### 1. Generate Assessment (Async)
-- **Endpoint**: `POST /generate` — `multipart/form-data`
+- **Endpoint**: `POST /ai-assessments/generate` — `multipart/form-data`
 - **Description**: Starts an event-driven generation job, or instantly clones an existing one if the same parameters were previously requested.
 - **Response**:
   - `202 Accepted` (`status: PENDING`) — New background job started.
@@ -177,8 +180,8 @@ The V2 API is the production-ready, event-driven iteration. It introduces **Auth
 
 | Form Field | Type | Description |
 | :--- | :--- | :--- |
-| `course_ids` | String | Comma-separated course IDs (e.g. `do_1,do_2`) |
-| `assessment_type` | Enum | `practice`, `final`, `comprehensive`, `standalone` |
+| `course_ids` | String | Comma-separated course IDs (e.g. `do_1,do_2`). Optional for `competency` type — leave blank to generate purely from KCM descriptions. |
+| `assessment_type` | Enum | `practice`, `final`, `comprehensive`, `standalone`, `competency` |
 | `difficulty` | Enum | `beginner`, `intermediate`, `advanced` |
 | `language` | Enum | `english`, `hindi`, `tamil`, `telugu`, etc. |
 | `total_questions` | Integer | Total number of questions to generate |
@@ -187,32 +190,59 @@ The V2 API is the production-ready, event-driven iteration. It introduces **Auth
 | `enable_blooms` | Boolean String | `"true"` enforces Bloom's Taxonomy distribution |
 | `blooms_config` | JSON String | Bloom's % per level — must sum to 100: `{"Remember": 20, "Understand": 20, "Apply": 20, "Analyze": 20, "Evaluate": 10, "Create": 10}` |
 | `course_weightage` | JSON String | Comprehensive only — % per course ID, must sum to 100: `{"do_1": 60, "do_2": 40}` |
+| `course_names` | String | Optional — comma-separated names matching `course_ids` order. Populates history immediately without waiting for job completion. |
 | `time_limit` | Integer | Duration in minutes — shifts cognitive level distribution |
-| `files` | File | PDF or VTT files for standalone assessments |
+| `competency_area` | String | Required for `competency` type — e.g. `"Decision Making"` |
+| `competency_themes` | String | Required for `competency` type — comma-separated themes e.g. `"Decision Making,Communication"` |
+| `competency_sub_themes` | String | Required for `competency` type — comma-separated sub-themes e.g. `"Logical Reasoning,Sound Judgment"` |
+| `files` | File | PDF or VTT files for standalone assessments. Also accepted for `competency` type to supplement KCM content. |
 
 ### 2. Check Status
-- **Endpoint**: `GET /status/{job_id}`
+- **Endpoint**: `GET /ai-assessments/status/{job_id}`
 - **Response**: Returns `status` (`PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`). When `COMPLETED`, includes the full `assessment_data` object.
 
 ### 3. Edit Assessment
-- **Endpoint**: `PUT /assessment/{job_id}`
+- **Endpoint**: `PUT /ai-assessments/update/{job_id}`
 - **Description**: Allows the owner to manually edit questions before finalising.
 - **Body**: `{"assessment_data": { ... }}`
 
 ### 4. Fetch User History
-- **Endpoint**: `GET /history`
+- **Endpoint**: `GET /ai-assessments/history`
 - **Description**: Returns all assessment jobs (any status) initiated by the authenticated user.
-- **Response**: Array of `{job_id, status, created_at, updated_at, config, error_message}`.
+- **Response**: Array of `{job_id, status, created_at, updated_at, course_ids, course_names, config, error_message}`.
 
 ### 5. Download Results
-All download endpoints support the `?token=` query parameter for browser-based access.
+- **Endpoint**: `GET /ai-assessments/download/{job_id}?format=<format>`
+- **Supported formats**: `csv`, `csv_basic`, `json`, `pdf`, `docx`
+- **Ownership**: Only the user who generated the assessment can download it — others get `403 Forbidden`.
+- **Invalid format**: Returns `400 Bad Request` with the list of supported formats.
 
 | Format | Endpoint |
 | :--- | :--- |
-| CSV (7-option V2 schema) | `GET /download_csv/{job_id}` |
-| JSON | `GET /download_json/{job_id}` |
-| PDF | `GET /download_pdf/{job_id}` |
-| Word (DOCX) | `GET /download_docx/{job_id}` |
+| CSV (full — with QuestionTagging, all types) | `GET /ai-assessments/download/{job_id}?format=csv` |
+| CSV Basic (no T/F, no QuestionTagging) | `GET /ai-assessments/download/{job_id}?format=csv_basic` |
+| JSON | `GET /ai-assessments/download/{job_id}?format=json` |
+| PDF | `GET /ai-assessments/download/{job_id}?format=pdf` |
+| Word (DOCX) | `GET /ai-assessments/download/{job_id}?format=docx` |
+
+> **UI Integration Note**: Do NOT use `<a href>` links with the token in the URL — this leaks the JWT in server logs and browser history. Use the fetch + Blob pattern instead:
+>
+> ```js
+> async function downloadAssessment(jobId, format, token) {
+>   const response = await fetch(
+>     `/ai-assessments/v1/download/${jobId}?format=${format}`,
+>     { headers: { 'x-authenticated-user-token': token } }
+>   );
+>   if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+>   const blob = await response.blob();
+>   const url = URL.createObjectURL(blob);
+>   const a = document.createElement('a');
+>   a.href = url;
+>   a.download = `${jobId}_assessment.${format}`;
+>   a.click();
+>   URL.revokeObjectURL(url);
+> }
+> ```
 
 ---
 
@@ -223,7 +253,7 @@ Assessment generation is asynchronous (LLM latency + file processing). Follow th
 ### Step 1: Start Generation
 
 ```bash
-POST /api/v2/generate
+POST /ai-assessments/v1/generate
 ```
 
 **Response (new job):**
@@ -246,7 +276,7 @@ POST /api/v2/generate
 
 ### Step 2: Poll for Status
 
-Poll `GET /api/v2/status/{job_id}` every 5–10 seconds:
+Poll `GET /ai-assessments/v1/status/{job_id}` every 5–10 seconds:
 
 | Status | Meaning | Suggested UI Action |
 | :--- | :--- | :--- |
@@ -291,7 +321,7 @@ Arrays keyed by question type: `Multiple Choice Question`, `FTB Question`, `MTF 
 
 Every question object includes:
 - `course_name` — source course (important for comprehensive assessments)
-- `answer_rationale` — `correct_answer_explanation`, `why_factor`, `logic_justification`
+- `answer_rationale` — `correct_answer_explanation` (labelled **Rationale** in exports), `why_factor`, `logic_justification`
 - `reasoning`:
   - `learning_objective_alignment` — verbatim match to a blueprint learning objective
   - `competency_alignment` — KCM area, theme, sub-theme, and domain
@@ -308,9 +338,10 @@ Every question object includes:
 ### Example 1: Standard Assessment (Single Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
+curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_1144540583527301121908"' \
+--form 'course_names="Foundations of Public Policy"' \
 --form 'assessment_type="practice"' \
 --form 'difficulty="intermediate"' \
 --form 'language="english"' \
@@ -324,9 +355,10 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
 ### Example 2: Comprehensive Assessment (Cross-Course)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
+curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'course_ids="do_courseA123,do_courseB456"' \
+--form 'course_names="Ethics in Governance,Foundations of Public Policy"' \
 --form 'assessment_type="comprehensive"' \
 --form 'difficulty="advanced"' \
 --form 'language="english"' \
@@ -340,8 +372,8 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
 ### Example 3: Standalone Assessment (File Upload)
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE' \
+curl --location 'http://localhost:8000/ai-assessments/v1/generate' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE' \
 --form 'assessment_type="standalone"' \
 --form 'difficulty="beginner"' \
 --form 'language="english"' \
@@ -355,26 +387,28 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/generate' \
 ### Example 4: Poll Job Status
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/status/comprehensive_do_courseA123_do_courseB456' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
+curl --location 'http://localhost:8000/ai-assessments/v1/status/comprehensive_do_courseA123_do_courseB456' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
 ### Example 5: Fetch User History
 
 ```bash
-curl --location 'http://localhost:8000/ai-assment-generation/api/v2/history' \
---header 'x-auth-token: YOUR_JWT_TOKEN_HERE'
+curl --location 'http://localhost:8000/ai-assessments/v1/history' \
+--header 'x-authenticated-user-token: YOUR_JWT_TOKEN_HERE'
 ```
 
 **Response (snippet):**
 ```json
 [
   {
-    "job_id": "comprehensive_do_courseA123_do_courseB456",
+    "job_id": "do_113948972799877120197_7fa321bd_1e8b6826-3326-4175-b202-f5f5971f457a",
     "status": "COMPLETED",
-    "created_at": "2026-03-10T11:45:00.000Z",
-    "updated_at": "2026-03-10T11:46:15.000Z",
-    "config": { "assessment_type": "comprehensive", "difficulty": "advanced", "total_questions": 20 },
+    "created_at": "2026-05-08T17:04:31.793723",
+    "updated_at": "2026-05-08T20:38:12.732428",
+    "course_ids": ["do_113948972799877120197"],
+    "course_names": ["Foundations of Public Policy"],
+    "config": { "assessment_type": "practice", "difficulty": "intermediate", "total_questions": 10 },
     "error_message": null
   }
 ]
@@ -383,17 +417,25 @@ curl --location 'http://localhost:8000/ai-assment-generation/api/v2/history' \
 ### Example 6: Download Results
 
 ```bash
-# CSV (7-option V2 schema)
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_csv/{job_id}?token=YOUR_JWT'
+# CSV
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=csv' \
+  --output assessment.csv
 
 # JSON
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_json/{job_id}?token=YOUR_JWT'
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=json' \
+  --output assessment.json
 
 # PDF
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_pdf/{job_id}?token=YOUR_JWT'
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=pdf' \
+  --output assessment.pdf
 
 # Word (DOCX)
-curl 'http://localhost:8000/ai-assment-generation/api/v2/download_docx/{job_id}?token=YOUR_JWT'
+curl -H 'x-authenticated-user-token: YOUR_JWT' \
+  'http://localhost:8000/ai-assessments/v1/download/{job_id}?format=docx' \
+  --output assessment.docx
 ```
 
 ---
@@ -452,17 +494,6 @@ curl 'http://localhost:8000/ai-assment-generation/api/v2/download_docx/{job_id}?
 ```
 
 ---
-
-## Legacy V1 API
-
-Still available at `/api/v1/...` for backward compatibility. Does not support cloning, editing, or user separation.
-
-- `POST /api/v1/generate` — Start generation
-- `GET /api/v1/status/{job_id}` — Poll status
-- `GET /api/v1/download_csv/{job_id}` — Download CSV
-- `GET /api/v1/download_json/{job_id}` — Download JSON
-- `GET /api/v1/download_pdf/{job_id}` — Download PDF
-- `GET /api/v1/download_docx/{job_id}` — Download DOCX
 
 ---
 

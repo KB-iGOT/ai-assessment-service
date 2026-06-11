@@ -13,27 +13,32 @@ load_dotenv()
 # --- Configuration ---
 # Default to localhost for local testing
 API_BASE = os.getenv("API_URL", "http://localhost:8000")
-API_V2 = f"{API_BASE}/api/v2"
+API_V1 = f"{API_BASE}/ai-assessments/v1"
 
-st.set_page_config(page_title="Assessment Generator V2 (Interactive)", layout="wide", page_icon="🧩")
+st.set_page_config(page_title="Assessment Generator (Interactive)", layout="wide", page_icon="🧩")
 
 # --- Sidebar: Auth & Config ---
 st.sidebar.title("⚙️ Configuration")
-auth_token = st.sidebar.text_input("Auth Token (JWT)", type="password", help="Enter your x-auth-token from iGot")
+auth_token = st.sidebar.text_input("Auth Token (JWT)", type="password", help="Enter your x-authenticated-user-token from iGot")
 
 if not auth_token:
-    st.sidebar.warning("⚠️ Auth Token is required for V2 API")
+    st.sidebar.warning("⚠️ Auth Token is required for API")
     
 force_new = st.sidebar.checkbox("Bypass Cache (Force New)", value=False)
 
 # Headers helper
+DISPLAY_LABELS = {
+    "Multiple Choice Question": "Single selection MCQs",
+    "Multi-Choice Question": "Multiple selection MCQs",
+}
+
 def get_headers():
     return {
-        "x-auth-token": auth_token,
+        "x-authenticated-user-token": auth_token,
         "bg-bypass-cache": "true" if force_new else "false"
     }
 
-st.title("🧩 Assessment Generator V2")
+st.title("🧩 Assessment Generator")
 st.markdown("Test the full **Generate -> Clone -> Edit -> Event** lifecycle.")
 
 # --- Tab Layout ---
@@ -52,14 +57,16 @@ with tab_gen:
             st.info("Upload-only mode active. Please upload files below.")
             course_id = ""
             course_ids_input = ""
+            course_names_input = ""
         else:
-            course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...")
+            course_ids_input = st.text_input("Course IDs (comma-separated)", placeholder="do_114297785654214656137, do_123...", help="Optional for competency type — leave blank to generate purely from KCM descriptions")
+            course_names_input = st.text_input("Course Names (comma-separated)", placeholder="Foundations of Public Policy, Ethics in Governance", help="Optional — used to show course names in history immediately")
 
     # Config Form
     with st.expander("Detailed Configuration", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "standalone"])
+            assessment_type = st.selectbox("Assessment Type", ["practice", "final", "standalone", "competency"])
         with col2:
             difficulty = st.selectbox("Difficulty", ["beginner", "intermediate", "advanced"], index=1)
         with col3:
@@ -111,20 +118,29 @@ with tab_gen:
                 
         with adv2:
             st.write("")
-        
+
+        if assessment_type == "competency":
+            st.markdown("#### Competency Focus (required for competency type)")
+            st.caption("Leave Course IDs blank to generate purely from KCM descriptions (no course content needed).")
+            comp_area = st.text_input("Competency Area", placeholder="e.g. Behavioural", key="comp_area")
+            comp_themes = st.text_input("Competency Themes (comma-separated)", placeholder="e.g. Service Orientation,Integrity", key="comp_themes")
+            comp_sub_themes = st.text_input("Competency Sub-Themes (comma-separated)", placeholder="e.g. Citizen Centricity,Empathy", key="comp_sub_themes")
+        else:
+            comp_area = comp_themes = comp_sub_themes = None
+
         uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
 
-    if st.button("Start Generation (V2)", type="primary"):
+    if st.button("Start Generation", type="primary"):
         if not auth_token:
             st.error("Please enter an Auth Token in the sidebar first.")
             st.stop()
             
         # Construct Payload
+        course_weightage = None
         q_counts = {"mcq": mcq, "ftb": ftb, "mtf": mtf, "multichoice": multi, "truefalse": tf}
         
         payload = {
-            'course_ids': course_ids_input,
-            'force': 'true' if force_new else 'false', 
+            'force': 'true' if force_new else 'false',
             'assessment_type': assessment_type,
             'difficulty': difficulty,
             'total_questions': sum(q_counts.values()),
@@ -132,26 +148,38 @@ with tab_gen:
             'language': language,
             'enable_blooms': 'true' if enable_blooms else 'false'
         }
+        if course_ids_input and course_ids_input.strip():
+            payload['course_ids'] = course_ids_input
         
         if enable_blooms and blooms_config:
             payload['blooms_config'] = json.dumps(blooms_config)
         
-        if course_weightage.strip():
+        if course_weightage and course_weightage.strip():
             payload['course_weightage'] = course_weightage.strip()
+
+        if course_names_input and course_names_input.strip():
+            payload['course_names'] = [n.strip() for n in course_names_input.split(",") if n.strip()]
         
         if time_limit > 0:
             payload['time_limit'] = time_limit
-        
+
+        if comp_area:
+            payload['competency_area'] = comp_area
+        if comp_themes:
+            payload['competency_themes'] = [t.strip() for t in comp_themes.split(",") if t.strip()]
+        if comp_sub_themes:
+            payload['competency_sub_themes'] = [s.strip() for s in comp_sub_themes.split(",") if s.strip()]
+
         files = []
         if uploaded_files:
             for f in uploaded_files:
                 mime = "application/pdf" if f.name.endswith(".pdf") else "text/vtt"
                 files.append(('files', (f.name, f.getvalue(), mime)))
 
-        with st.spinner("Calling V2 API..."):
+        with st.spinner("Calling API..."):
             try:
-                # V2 Generate Call
-                r = requests.post(f"{API_V2}/generate", data=payload, files=files, headers=get_headers())
+                # Generate Call
+                r = requests.post(f"{API_V1}/generate", data=payload, files=files, headers=get_headers())
                 
                 if r.status_code in [200, 202]:
                     data = r.json()
@@ -179,26 +207,28 @@ with tab_comp:
     
     # Dynamic Course Inputs
     if "comp_courses" not in st.session_state:
-        st.session_state.comp_courses = [{"id": "", "weight": 50}, {"id": "", "weight": 50}]
-        
+        st.session_state.comp_courses = [{"id": "", "name": "", "weight": 50}, {"id": "", "name": "", "weight": 50}]
+
     st.markdown("#### Input Courses & Weights")
-    
+
     course_data = []
     total_weight = 0
     for i, course in enumerate(st.session_state.comp_courses):
-        col1, col2, col3 = st.columns([5, 2, 1])
+        col1, col2, col3, col4 = st.columns([4, 4, 2, 1])
         with col1:
             c_id = st.text_input(f"Course ID {i+1}", value=course["id"], key=f"cid_{i}")
         with col2:
-            c_w = st.number_input(f"Weight (%)", min_value=1, max_value=100, value=course["weight"], key=f"cw_{i}")
+            c_name = st.text_input(f"Course Name {i+1}", value=course.get("name", ""), placeholder="e.g. Ethics in Governance", key=f"cname_{i}")
         with col3:
-            st.write("") # Spacing
+            c_w = st.number_input(f"Weight (%)", min_value=1, max_value=100, value=course["weight"], key=f"cw_{i}")
+        with col4:
+            st.write("")
             st.write("")
             if st.button("🗑️", key=f"del_{i}"):
                 st.session_state.comp_courses.pop(i)
                 st.rerun()
-                
-        course_data.append({"id": c_id, "weight": c_w})
+
+        course_data.append({"id": c_id, "name": c_name, "weight": c_w})
         total_weight += c_w
         
     if st.button("➕ Add Another Course"):
@@ -267,12 +297,13 @@ with tab_comp:
             st.stop()
             
         c_ids = [c["id"].strip() for c in valid_courses]
+        c_names = [c.get("name", "").strip() for c in valid_courses]
         c_weights = {c["id"].strip(): c["weight"] for c in valid_courses}
-        
+
         comp_q_counts = {"mcq": cmcq, "ftb": cftb, "mtf": cmtf, "multichoice": cmulti, "truefalse": ctf}
         comp_payload = {
             'course_ids': ",".join(c_ids),
-            'force': 'true' if force_new else 'false', 
+            'force': 'true' if force_new else 'false',
             'assessment_type': 'comprehensive',
             'difficulty': comp_diff,
             'total_questions': total_q,
@@ -281,13 +312,15 @@ with tab_comp:
             'enable_blooms': 'true' if comp_enable_blooms else 'false',
             'course_weightage': json.dumps(c_weights)
         }
+        if any(c_names):
+            comp_payload['course_names'] = [n for n in c_names if n]
         
         if comp_enable_blooms and comp_blooms_config:
             comp_payload['blooms_config'] = json.dumps(comp_blooms_config)
         
-        with st.spinner("Calling V2 API (Comprehensive)..."):
+        with st.spinner("Calling API (Comprehensive)..."):
             try:
-                r = requests.post(f"{API_V2}/generate", data=comp_payload, headers=get_headers())
+                r = requests.post(f"{API_V1}/generate", data=comp_payload, headers=get_headers())
                 if r.status_code in [200, 202]:
                     data = r.json()
                     st.session_state['current_job_id'] = data.get("job_id")
@@ -317,10 +350,8 @@ with tab_view:
             if not auth_token: st.error("Auth Token Required"); st.stop()
             
             try:
-                # V2 Status Check (Uses V2 GET typically, effectively same as V1 but we should use api/v2 prefix if exists? 
-                # Doc says Polling is V1 compatible. But api/v2/status exists? 
-                # Actually code implemented api_v2_router.get("/status/{job_id}")
-                r = requests.get(f"{API_V2}/status/{job_id}", headers=get_headers())
+                # GET /ai-assessments/v1/status/{job_id} — returns status and result when COMPLETED
+                r = requests.get(f"{API_V1}/status/{job_id}", headers=get_headers())
                 if r.status_code == 200:
                     st.session_state['fetch_data'] = r.json()
                     st.success("Fetched!")
@@ -336,13 +367,29 @@ with tab_view:
         st.metric("Status", status)
         
         if status == "COMPLETED":
-            # Downloads
+            # Downloads — token sent in header, not URL query param
             st.markdown("### 📥 Downloads")
-            d1, d2, d3 = st.columns(3)
-            # V2 CSV Link
-            d1.markdown(f"[**Download CSV (V2)**]({API_V2}/download_csv/{job_id}?token={auth_token})")
-            d2.markdown(f"[Download JSON]({API_V2}/download_json/{job_id}?token={auth_token})")
-            d3.markdown(f"[Download PDF]({API_V2}/download_pdf/{job_id}?token={auth_token})")
+            d1, d2, d3, d4, d5 = st.columns(5)
+            for fmt, col, label, mime in [
+                ("csv",       d1, "Download CSV",       "text/csv"),
+                ("csv_basic", d2, "Download CSV Basic", "text/csv"),
+                ("json",      d3, "Download JSON",      "application/json"),
+                ("pdf",       d4, "Download PDF",       "application/pdf"),
+                ("docx",      d5, "Download DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            ]:
+                try:
+                    dl_resp = requests.get(
+                        f"{API_V1}/download/{job_id}",
+                        params={"format": fmt},
+                        headers=get_headers(),
+                    )
+                    if dl_resp.status_code == 200:
+                        ext = "csv" if fmt == "csv_basic" else fmt
+                        col.download_button(label, dl_resp.content, file_name=f"assessment_{job_id}_{fmt}.{ext}", mime=mime)
+                    else:
+                        col.error(f"{fmt.upper()} failed ({dl_resp.status_code})")
+                except Exception as e:
+                    col.error(f"{fmt.upper()} error: {e}")
 
             # EDITOR
             st.markdown("### ✏️ Interactive Editor")
@@ -360,7 +407,7 @@ with tab_view:
                 new_questions_data = {}
                 
                 for q_type, q_list in questions.items():
-                    st.markdown(f"**{q_type}**")
+                    st.markdown(f"**{DISPLAY_LABELS.get(q_type, q_type)}**")
                     new_q_list = []
                     for i, q in enumerate(q_list):
                         qk = f"{q_type}_{i}"
@@ -425,17 +472,17 @@ with tab_view:
                             
                     new_questions_data[q_type] = new_q_list
                 
-                if st.form_submit_button("💾 Save Changes (PUT /api/v2)"):
+                if st.form_submit_button("💾 Save Changes (PUT /ai-assessments/v1/update/{job_id})"):
                     # Construct full payload
                     updated_assessment = raw_res.copy()
                     updated_assessment['questions'] = new_questions_data
-                    
+
                     update_payload = {"assessment_data": updated_assessment}
-                    
+
                     try:
                         r_upd = requests.put(
-                            f"{API_V2}/assessment/{job_id}", 
-                            json=update_payload, 
+                            f"{API_V1}/update/{job_id}",
+                            json=update_payload,
                             headers=get_headers()
                         )
                         if r_upd.status_code == 200:
@@ -460,7 +507,7 @@ with tab_history:
         else:
             with st.spinner("Fetching history..."):
                 try:
-                    r_hist = requests.get(f"{API_V2}/history", headers=get_headers())
+                    r_hist = requests.get(f"{API_V1}/history", headers=get_headers())
                     if r_hist.status_code == 200:
                         st.session_state['history_data'] = r_hist.json()
                     else:
@@ -476,23 +523,38 @@ with tab_history:
             status = item.get("status", "Unknown")
             updated = item.get("updated_at", "Unknown")
             config = item.get("config", {})
-            
+            course_names = item.get("course_names", [])
+            course_ids_list = item.get("course_ids", [])
+            course_label = ", ".join(course_names) if course_names else "Unknown Course"
+
             # Status badge logic
             status_emoji = "⏳"
             if status == "COMPLETED": status_emoji = "✅"
             elif status == "FAILED": status_emoji = "❌"
             elif status == "PENDING": status_emoji = "🕒"
-            
-            with st.expander(f"{status_emoji} Job: {job_id} | Updated: {updated[:10]}", expanded=(idx == 0)):
+
+            with st.expander(f"{status_emoji} {course_label} | Updated: {updated[:10]}", expanded=(idx == 0)):
                 cols = st.columns([2, 1])
-                
+
                 with cols[0]:
-                    st.markdown("**Configuration Used:**")
+                    st.write(f"- **Job ID:** `{job_id}`")
+                    if course_names:
+                        st.write(f"- **Course(s):** {', '.join(course_names)}")
+                    if course_ids_list:
+                        st.write(f"- **Course ID(s):** {', '.join(course_ids_list)}")
+                    st.write(f"- **Created:** {item.get('created_at', 'N/A')[:19].replace('T', ' ')}")
+                    st.write(f"- **Updated:** {updated[:19].replace('T', ' ')}")
+                    st.markdown("**Configuration:**")
                     if config:
                         st.write(f"- **Type:** {config.get('assessment_type', 'N/A')}")
                         st.write(f"- **Difficulty:** {config.get('difficulty', 'N/A')}")
                         st.write(f"- **Language:** {config.get('language', 'N/A')}")
                         st.write(f"- **Total Questions:** {config.get('total_questions', 'N/A')}")
+                        q_counts = config.get('question_type_counts', {})
+                        if q_counts:
+                            active = ", ".join(f"{k.upper()}:{v}" for k, v in q_counts.items() if v > 0)
+                            st.write(f"- **Question Types:** {active}")
+                        st.write(f"- **Time Limit:** {config.get('time_limit', 0) or 'No limit'}")
                         if config.get('course_weightage'):
                             st.write(f"- **Course Weightage:** `{config.get('course_weightage')}`")
                     else:
@@ -505,8 +567,27 @@ with tab_history:
                             st.session_state['current_job_id'] = job_id
                             st.success(f"Job {job_id} loaded! Switch to 'View & Edit Result' tab.")
                         
-                        # Downloads
-                        st.markdown(f"[Download CSV]({API_V2}/download_csv/{job_id}?token={auth_token}) | [Download PDF]({API_V2}/download_pdf/{job_id}?token={auth_token})")
+                        # Downloads — token sent in header, not URL query param
+                        dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
+                        for fmt, col, label, mime in [
+                            ("csv",       dl_col1, "CSV",       "text/csv"),
+                            ("csv_basic", dl_col2, "CSV Basic", "text/csv"),
+                            ("pdf",       dl_col3, "PDF",       "application/pdf"),
+                            ("docx",      dl_col4, "DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                        ]:
+                            try:
+                                dl_r = requests.get(
+                                    f"{API_V1}/download/{job_id}",
+                                    params={"format": fmt},
+                                    headers=get_headers(),
+                                )
+                                if dl_r.status_code == 200:
+                                    ext = "csv" if fmt == "csv_basic" else fmt
+                                    col.download_button(f"Download {label}", dl_r.content, file_name=f"assessment_{job_id}_{fmt}.{ext}", mime=mime, key=f"dl_{fmt}_{job_id}")
+                                else:
+                                    col.error(f"{label} failed ({dl_r.status_code})")
+                            except Exception as e:
+                                col.error(f"{label} error: {e}")
                     else:
                         st.write(f"*Job is {status}* ‒ wait for completion.")
     elif history_items == []:

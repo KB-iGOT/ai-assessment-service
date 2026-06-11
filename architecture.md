@@ -258,7 +258,7 @@ The generated assessment follows a strict schema enforced by the LLM.
 The V2 API introduces Authentication, Cloning, and Interactive Editing.
 
 ### 9.1 Generate (`POST /api/v2/generate`)
-- **Headers**: `x-auth-token` (JWT)
+- **Headers**: `x-authenticated-user-token` (JWT)
 - **Logic**:
     1.  **Auth**: Validates JWT, extracts `user_id`.
     2.  **Hash**: Computes hash of inputs.
@@ -268,7 +268,7 @@ The V2 API introduces Authentication, Cloning, and Interactive Editing.
         - `202 Accepted`: If new generation started.
 
 ### 9.2 Edit (`PUT /api/v2/assessment/{job_id}`)
-- **Headers**: `x-auth-token`
+- **Headers**: `x-authenticated-user-token`
 - **Logic**: Updates `assessment_data` ONLY if `user_id` matches the owner.
 - **Payload**: `{"assessment_data": { ... }}`
 

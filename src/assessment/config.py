@@ -13,12 +13,24 @@ else:
     load_dotenv()
 
 # API Configuration
-KARMAYOGI_API_KEY = os.getenv("KARMAYOGI_API_KEY", "")
-SEARCH_API_URL = "https://igotkarmayogi.gov.in/api/content/v1/search"
-TRANSCODER_STATS_URL = "https://learning-ai.prod.karmayogibharat.net/api/kb-pipeline/v3/transcoder/stats"
+KARMAYOGI_API_KEY = os.getenv("KARMAYOGI_API_KEY")  # Expected format: "Bearer <token>"
+KARMAYOGI_BASE_URL = os.getenv("KARMAYOGI_BASE_URL", "https://igotkarmayogi.gov.in")
+LEARNING_AI_BASE_URL = os.getenv("LEARNING_AI_BASE_URL", "https://learning-ai.prod.karmayogibharat.net")
+
+# Derived API endpoints
+SEARCH_API_URL = f"{KARMAYOGI_BASE_URL}/api/content/v1/search"
+TRANSCODER_STATS_URL = f"{LEARNING_AI_BASE_URL}/api/kb-pipeline/v3/transcoder/stats"
+
+# SSO / Auth Configuration
+SSO_URL = os.getenv("SUNBIRD_SSO_URL")
+SSO_REALM = os.getenv("SUNBIRD_SSO_REALM")
+REQUIRED_ROLE = os.getenv("REQUIRED_ROLE", "AI_ASSESSMENT_CREATOR")
+
+# Derived: JWKS endpoint built from SSO_URL + realm
+JWKS_URL = f"{SSO_URL}realms/{SSO_REALM}/protocol/openid-connect/certs" if SSO_URL and SSO_REALM else None
 
 # Database
-DB_DSN = os.getenv("DB_DSN", "postgresql://myuser:mypassword@localhost:5432/karmayogi_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://myuser:mypassword@localhost:5432/karmayogi_db")
 
 # Paths
 # Store data in the root directory's interactive_courses_data folder (or custom path)
@@ -31,14 +43,23 @@ GOOGLE_LOCATION = os.getenv("GOOGLE_LOCATION", "us-central1")
 GENAI_MODEL_NAME = os.getenv("GENAI_MODEL_NAME", "gemini-2.5-pro")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 
+# Storage backend for standalone upload file sharing between API and Worker pods
+# DOCUMENT_STORAGE_TYPE: "local" (default, single-node) | "gcs" (multi-pod / Kubernetes)
+DOCUMENT_STORAGE_TYPE = os.getenv("DOCUMENT_STORAGE_TYPE", "local")
+GCS_CREDENTIALS = os.getenv("GCS_CREDENTIALS")
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "")
+GCS_UPLOAD_PREFIX = os.getenv("GCS_UPLOAD_PREFIX", "ai-assessments/uploads")
+
 # Headers for Karmayogi API
+if not KARMAYOGI_API_KEY:
+    raise RuntimeError("Missing mandatory env var: KARMAYOGI_API_KEY")
+
 API_HEADERS = {
     'accept': 'application/json, text/plain, */*',
-    'authorization': f'Bearer {KARMAYOGI_API_KEY}' if KARMAYOGI_API_KEY else '',
+    'authorization': KARMAYOGI_API_KEY,
     'org': 'dopt',
     'rootorg': 'igot',
     'locale': 'en',
-    # 'hostpath': 'portal.uat.karmayogibharat.net' # Optional based on JS
 }
 
 # Load Prompt Version
