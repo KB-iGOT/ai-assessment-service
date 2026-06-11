@@ -206,7 +206,9 @@ async def generate_v1(
     b_dist = None
     if blooms_config:
         try:
-            b_dist = json.loads(blooms_config)
+            raw = json.loads(blooms_config)
+            # Normalize keys to title-case so "create"/"CREATE" all match "Create"
+            b_dist = {k.capitalize(): v for k, v in raw.items()}
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Invalid JSON for blooms_config")
 
