@@ -523,6 +523,8 @@ async def extract_vtt_text(vtt_path: Path) -> str:
             line = line.strip()
             if not line or line.upper().startswith('WEBVTT') or '-->' in line or line.isdigit():
                 continue
+            if line.startswith('//'):
+                continue
             text_lines.append(line)
         return '\n'.join(text_lines)
 
