@@ -155,7 +155,7 @@ async def generate_assessment(
     logger.info(f"Generating assessment for {composite_id} (Type: {assessment_type})")
 
     # 1. Aggregate Content from All Courses
-    aggregated_metadata = {"courses": []}
+    aggregated_metadata = {"courses": [], "content_availability": {}}
     combined_transcript = []
     combined_pdfs = []
     
@@ -187,41 +187,49 @@ async def generate_assessment(
                      combined_learning_objectives.append(instructions)
                 
             # Transcript (Recursive - find all english_subtitles.vtt in subfolders)
+            vtt_found = False
             for vtt_path in c_path.rglob("english_subtitles.vtt"):
                  try:
                      text = await extract_vtt_text(vtt_path)
                      if not text: continue
-                     
+
                      # Deduplication Check
                      text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
                      if text_hash in seen_content_hashes:
                          logger.info(f"Skipping duplicate VTT content: {vtt_path.name}")
                          continue
                      seen_content_hashes.add(text_hash)
-                     
+
                      rel_path = vtt_path.relative_to(c_path)
                      combined_transcript.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
+                     vtt_found = True
                  except Exception as e:
                      logger.warning(f"Failed to read VTT {vtt_path}: {e}")
-                
+
             # PDFs (Recursive - find all PDFs in subfolders)
+            pdf_found = False
             for pdf_file in c_path.rglob("*.pdf"):
-                 # Avoid reading the same file if multiple symlinks or structure exists
                  try:
                     text = await extract_pdf_text(pdf_file)
                     if not text: continue
-    
+
                     # Deduplication Check
                     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
                     if text_hash in seen_content_hashes:
                         logger.info(f"Skipping duplicate PDF content: {pdf_file.name}")
                         continue
                     seen_content_hashes.add(text_hash)
-    
+
                     rel_path = pdf_file.relative_to(c_path)
                     combined_pdfs.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
+                    pdf_found = True
                  except Exception as e:
                      logger.warning(f"Failed to read PDF {pdf_file}: {e}")
+
+            aggregated_metadata["content_availability"][cid] = {
+                "has_vtt": vtt_found,
+                "has_pdf": pdf_found,
+            }
     else:
         if assessment_type == "competency" and competency_area:
             # No course content — build context from KCM descriptions matching the requested area/themes/sub-themes
@@ -256,13 +264,23 @@ async def generate_assessment(
 
     # Process Extra Uploaded Files (from API)
     if extra_files:
+        uploaded_vtt = False
+        uploaded_pdf = False
         for fpath in extra_files:
             if fpath.suffix.lower() == '.pdf':
                 text = await extract_pdf_text(fpath)
-                combined_pdfs.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
+                if text:
+                    combined_pdfs.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
+                    uploaded_pdf = True
             elif fpath.suffix.lower() == '.vtt':
                 text = await extract_vtt_text(fpath)
-                combined_transcript.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
+                if text:
+                    combined_transcript.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
+                    uploaded_vtt = True
+        aggregated_metadata["content_availability"]["uploaded_files"] = {
+            "has_vtt": uploaded_vtt,
+            "has_pdf": uploaded_pdf,
+        }
 
     final_transcript_str = "\n\n".join(combined_transcript) if combined_transcript else "N/A"
     final_pdf_str = "\n\n".join(combined_pdfs) if combined_pdfs else "N/A"
