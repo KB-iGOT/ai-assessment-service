@@ -34,9 +34,10 @@ system_prompt_template: |
   6. Additional Instructions (SME notes):
      {additional_instructions}
 
-  7. Bloom’s Taxonomy Distribution (Strict):
+  7. Bloom’s Taxonomy Assignment (NON-NEGOTIABLE):
      {blooms_distribution}
-     - If marked as Disabled, ignore Bloom's balancing entirely.
+     - If marked as Disabled, ignore Bloom’s balancing entirely.
+     - If per-question assignments are listed, you MUST write each question at exactly the assigned Bloom’s level. Do NOT change the assigned level.
 
   8. Difficulty Level:
      {difficulty_level}

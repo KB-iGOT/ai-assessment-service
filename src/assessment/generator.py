@@ -4,6 +4,7 @@ import hashlib
 import asyncio
 import logging
 import time
+import random
 import yaml
 import fitz  # PyMuPDF
 from pathlib import Path
@@ -86,6 +87,25 @@ async def get_or_create_kcm_cache() -> str:
     except Exception as e:
         logger.error(f"Failed to create KCM cache: {e}")
         return None
+
+def compute_blooms_slots(blooms_distribution: Dict[str, int], total_questions: int) -> List[str]:
+    """Pre-assigns a Bloom's level to each question slot based on the requested distribution."""
+    slots = []
+    remaining = total_questions
+    items = sorted(blooms_distribution.items(), key=lambda x: -x[1])
+    for i, (level, pct) in enumerate(items):
+        if i == len(items) - 1:
+            count = remaining
+        else:
+            count = round(total_questions * pct / 100)
+            count = min(count, remaining)
+        slots.extend([level] * count)
+        remaining -= count
+        if remaining <= 0:
+            break
+    random.shuffle(slots)
+    return slots
+
 
 async def generate_assessment(
     question_type_counts: Dict[str, int],
@@ -256,6 +276,7 @@ async def generate_assessment(
         final_lo_str = "\n".join([f"- {lo}" for lo in unique_los])
     
     # 2. Format Bloom's Distribution
+    blooms_slots = None
     if not enable_blooms:
         blooms_str = "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
     elif not blooms_distribution:
@@ -269,8 +290,11 @@ async def generate_assessment(
         else:
             blooms_str = "Remember: 20%, Understand: 25%, Apply: 25%, Analyze: 20%, Evaluate: 10%"
     else:
-        # User defined
-        blooms_str = ", ".join([f"{k}: {v}%" for k,v in blooms_distribution.items()])
+        # User defined — pre-assign per-question Bloom's slots for strict enforcement
+        actual_total = sum(question_type_counts.values()) if question_type_counts else total_questions
+        blooms_slots = compute_blooms_slots(blooms_distribution, actual_total)
+        slot_lines = "\n     ".join([f"Question {i+1}: {level}" for i, level in enumerate(blooms_slots)])
+        blooms_str = f"Per-question assignment (NON-NEGOTIABLE — write each question to match its assigned level):\n     {slot_lines}"
 
     # 3. Format Topics
     topics_str = ", ".join(topic_names) if topic_names else "None specific (Cover all modules)"
