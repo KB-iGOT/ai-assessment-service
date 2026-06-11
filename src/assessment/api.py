@@ -1,5 +1,6 @@
 import os
 import shutil
+import tempfile
 import logging
 import json
 from pathlib import Path
@@ -396,6 +397,7 @@ SUPPORTED_FORMATS = {"csv", "csv_basic", "json", "pdf", "docx"}
 async def download_assessment_v1(
     job_id: str,
     format: str,
+    background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user)
 ):
     logger.info(f"[{job_id}] Download request | format={format} | user={user_id}")
@@ -416,32 +418,33 @@ async def download_assessment_v1(
         raise HTTPException(status_code=403, detail="Access denied: you do not own this assessment")
 
     assessment_json = data['assessment_data']
-    base_path = Path(INTERACTIVE_COURSES_PATH)
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"assessment_{job_id}_"))
+    background_tasks.add_task(shutil.rmtree, str(tmp_dir), True)
     logger.info(f"[{job_id}] Generating {format} export | user={user_id}")
 
     if format == "csv":
-        path = base_path / f"{job_id}_assessment_v2.csv"
+        path = tmp_dir / f"{job_id}_assessment_v2.csv"
         generate_csv_v2(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.csv", media_type="text/csv")
 
     elif format == "csv_basic":
-        path = base_path / f"{job_id}_assessment_basic.csv"
+        path = tmp_dir / f"{job_id}_assessment_basic.csv"
         generate_csv_basic(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment_basic.csv", media_type="text/csv")
 
     elif format == "json":
-        path = base_path / f"{job_id}_assessment_v2.json"
+        path = tmp_dir / f"{job_id}_assessment_v2.json"
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(assessment_json, f, indent=2, ensure_ascii=False)
         return FileResponse(path, filename=f"{job_id}_assessment.json", media_type="application/json")
 
     elif format == "pdf":
-        path = base_path / f"{job_id}_assessment_v2.pdf"
+        path = tmp_dir / f"{job_id}_assessment_v2.pdf"
         generate_pdf(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.pdf", media_type="application/pdf")
 
     elif format == "docx":
-        path = base_path / f"{job_id}_assessment_v2.docx"
+        path = tmp_dir / f"{job_id}_assessment_v2.docx"
         generate_docx(assessment_json, path)
         return FileResponse(path, filename=f"{job_id}_assessment.docx", media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 

@@ -16,8 +16,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from .config import (
     DATABASE_URL,
-    GOOGLE_PROJECT_ID, GOOGLE_LOCATION, GENAI_MODEL_NAME, 
-    GOOGLE_APPLICATION_CREDENTIALS, PROMPT_VERSION
+    GOOGLE_PROJECT_ID, GOOGLE_LOCATION, GENAI_MODEL_NAME,
+    GOOGLE_APPLICATION_CREDENTIALS, PROMPT_VERSION, INTERACTIVE_COURSES_PATH
 )
 
 logger = logging.getLogger(__name__)
@@ -149,8 +149,7 @@ async def generate_assessment(
     else:
         composite_id = "custom_content_generation"
     
-    # Base Path for Interactive Courses (should probably be passed in, but using config implied path for now)
-    base_path = Path("/app/interactive_courses_data") 
+    base_path = Path(INTERACTIVE_COURSES_PATH)
     
     logger.info(f"Generating assessment for {composite_id} (Type: {assessment_type})")
 
