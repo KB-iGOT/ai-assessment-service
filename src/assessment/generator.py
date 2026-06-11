@@ -123,7 +123,6 @@ def compute_blooms_by_type(
         "mcq":         BLOOM_RANK["Create"],
     }
 
-    # Active types sorted highest ceiling first so higher levels get assigned first
     active_types = [t for t in question_type_counts if question_type_counts.get(t, 0) > 0]
     active_types.sort(key=lambda t: -TYPE_CEILING.get(t, 0))
 
@@ -145,51 +144,53 @@ def compute_blooms_by_type(
         if remaining <= 0:
             break
 
-    # Step 2: build pool sorted highest level first
-    pool: List[str] = []
-    for level in reversed(BLOOM_ORDER):
-        pool.extend([level] * level_counts.get(level, 0))
+    # Step 2: build a mutable counter of available slots per level
+    available: Dict[str, int] = {l: level_counts.get(l, 0) for l in BLOOM_ORDER}
 
-    # Step 3: assign to each type respecting its ceiling
+    # Step 3: for each type (highest ceiling first), greedily assign levels that fit.
+    # Levels above a type's ceiling are NEVER clamped — they stay in the pool and are
+    # absorbed by the highest-ceiling types (MCQ/MultiChoice) which have no restriction.
+    # This preserves the exact level distribution regardless of question type mix.
     result: Dict[str, List[str]] = {t: [] for t in active_types}
-    overflow: List[str] = []
 
     for t in active_types:
         ceiling = TYPE_CEILING.get(t, BLOOM_RANK["Create"])
         needed = question_type_counts[t]
         assigned: List[str] = []
 
-        # First absorb any overflow that fits this type
-        new_overflow = []
-        for lvl in overflow:
-            if len(assigned) < needed and BLOOM_RANK[lvl] <= ceiling:
-                assigned.append(lvl)
-            else:
-                new_overflow.append(lvl)
-        overflow = new_overflow
-
-        # Then draw from pool
-        new_pool = []
-        for lvl in pool:
-            if len(assigned) < needed and BLOOM_RANK[lvl] <= ceiling:
-                assigned.append(lvl)
-            else:
-                new_pool.append(lvl)
-        pool = new_pool
-
-        # If still short (no suitable levels left), cap overflow to this type's ceiling
-        # This happens when all remaining types are low-ceiling but high levels dominate
-        while len(assigned) < needed and (pool or overflow):
-            src = pool if pool else overflow
-            lvl = src.pop(0)
-            if src is overflow and lvl in overflow:
-                overflow.remove(lvl)
-            # Clamp to ceiling
-            clamped = lvl if BLOOM_RANK[lvl] <= ceiling else BLOOM_ORDER[ceiling]
-            assigned.append(clamped)
+        # Take levels highest-first that fit within this type's ceiling
+        for level in reversed(BLOOM_ORDER):
+            if len(assigned) >= needed:
+                break
+            if BLOOM_RANK[level] > ceiling:
+                continue
+            take = min(available[level], needed - len(assigned))
+            assigned.extend([level] * take)
+            available[level] -= take
 
         random.shuffle(assigned)
         result[t] = assigned
+
+    # Step 4: any levels still in `available` could not be placed in low-ceiling types
+    # (e.g., Create slots when only FTB/TF remain). Redistribute them to the
+    # highest-ceiling types that still have unfilled slots, keeping the label as-is.
+    for level in reversed(BLOOM_ORDER):
+        while available[level] > 0:
+            # Find the type with highest ceiling that has room
+            placed = False
+            for t in active_types:
+                needed = question_type_counts[t]
+                if len(result[t]) < needed:
+                    result[t].append(level)
+                    available[level] -= 1
+                    placed = True
+                    break
+            if not placed:
+                break  # shouldn't happen if total counts are consistent
+
+    # Re-shuffle after any top-up from step 4
+    for t in active_types:
+        random.shuffle(result[t])
 
     return result
 
