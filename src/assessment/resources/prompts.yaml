@@ -37,7 +37,16 @@ system_prompt_template: |
   7. Bloom’s Taxonomy Assignment (NON-NEGOTIABLE):
      {blooms_distribution}
      - If marked as Disabled, ignore Bloom’s balancing entirely.
-     - If per-question assignments are listed, you MUST write each question at exactly the assigned Bloom’s level. Do NOT change the assigned level.
+     - If per-type assignments are listed, they are HARD CONSTRAINTS:
+       For each question type, assign the Bloom’s levels IN THE ORDER listed to your
+       questions of that type. The Nth level = the Nth question of that type.
+       Write the question CONTENT to genuinely reflect that cognitive level —
+       do not just label it; the thinking required must match the level.
+       Set `blooms_level` in the output to exactly the assigned level.
+       IMPORTANT: Do NOT default to lower levels (Remember/Understand) just because
+       a question type seems simpler. Every question type (FTB, MTF, True/False) CAN
+       be written at higher Bloom’s levels — e.g. a Create-level FTB asks learners to
+       synthesise a concept; an Analyze-level MTF requires discriminating relationships.
 
   8. Difficulty Level:
      {difficulty_level}
@@ -284,7 +293,9 @@ system_prompt_template: |
   ------------------------------------------------------------
   Before producing output, verify:
   - Exact question counts per type are met
-  - Bloom and difficulty distributions are respected
   - All text is in the selected input_language
   - All competencies are sourced ONLY from KCM
   - Every question includes reasoning + relevance percentage
+  - If per-type Bloom's assignments were provided: for each question type, verify
+    that the Nth question of that type has `blooms_level` equal to the Nth level in
+    its assignment list. If any mismatch is found, rewrite that question before outputting.
