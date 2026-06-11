@@ -88,23 +88,110 @@ async def get_or_create_kcm_cache() -> str:
         logger.error(f"Failed to create KCM cache: {e}")
         return None
 
-def compute_blooms_slots(blooms_distribution: Dict[str, int], total_questions: int) -> List[str]:
-    """Pre-assigns a Bloom's level to each question slot based on the requested distribution."""
-    slots = []
-    remaining = total_questions
-    items = sorted(blooms_distribution.items(), key=lambda x: -x[1])
+def compute_blooms_by_type(
+    blooms_distribution: Dict[str, int],
+    question_type_counts: Dict[str, int],
+) -> Dict[str, List[str]]:
+    """
+    Distributes Bloom's levels across question types respecting both the requested
+    percentage distribution AND each type's cognitive ceiling.
+
+    Cognitive ceilings (structural limits of each format):
+      truefalse  → max Understand  (binary choice can't go beyond comprehension)
+      ftb        → max Apply       (recall/apply a term; synthesis is unnatural)
+      mtf        → max Analyze     (matching relationships; evaluation/creation unnatural)
+      multichoice / mcq → all levels
+
+    Algorithm:
+      1. Compute total count per Bloom's level from percentages (largest-remainder).
+      2. Build a pool sorted highest→lowest level.
+      3. Assign types from highest-ceiling to lowest — each type takes what it can
+         absorb from the remaining pool.
+      4. Any overflow (levels a type can't absorb) is redirected to the next
+         highest-ceiling type that still has capacity.
+      5. Shuffle the assigned list per type so the LLM doesn't see a monotone sequence.
+    """
+    BLOOM_ORDER = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"]
+    BLOOM_RANK = {l: i for i, l in enumerate(BLOOM_ORDER)}
+
+    # Cognitive ceiling per type (highest level index the type can handle)
+    TYPE_CEILING: Dict[str, int] = {
+        "truefalse":   BLOOM_RANK["Understand"],
+        "ftb":         BLOOM_RANK["Apply"],
+        "mtf":         BLOOM_RANK["Analyze"],
+        "multichoice": BLOOM_RANK["Create"],
+        "mcq":         BLOOM_RANK["Create"],
+    }
+
+    # Active types sorted highest ceiling first so higher levels get assigned first
+    active_types = [t for t in question_type_counts if question_type_counts.get(t, 0) > 0]
+    active_types.sort(key=lambda t: -TYPE_CEILING.get(t, 0))
+
+    total = sum(question_type_counts.get(t, 0) for t in active_types)
+
+    # Step 1: compute count per Bloom level (largest-remainder method)
+    active_levels = {k: v for k, v in blooms_distribution.items() if v > 0}
+    items = sorted(active_levels.items(), key=lambda x: -x[1])
+    level_counts: Dict[str, int] = {}
+    remaining = total
     for i, (level, pct) in enumerate(items):
         if i == len(items) - 1:
             count = remaining
         else:
-            count = round(total_questions * pct / 100)
+            count = round(total * pct / 100)
             count = min(count, remaining)
-        slots.extend([level] * count)
+        level_counts[level] = count
         remaining -= count
         if remaining <= 0:
             break
-    random.shuffle(slots)
-    return slots
+
+    # Step 2: build pool sorted highest level first
+    pool: List[str] = []
+    for level in reversed(BLOOM_ORDER):
+        pool.extend([level] * level_counts.get(level, 0))
+
+    # Step 3: assign to each type respecting its ceiling
+    result: Dict[str, List[str]] = {t: [] for t in active_types}
+    overflow: List[str] = []
+
+    for t in active_types:
+        ceiling = TYPE_CEILING.get(t, BLOOM_RANK["Create"])
+        needed = question_type_counts[t]
+        assigned: List[str] = []
+
+        # First absorb any overflow that fits this type
+        new_overflow = []
+        for lvl in overflow:
+            if len(assigned) < needed and BLOOM_RANK[lvl] <= ceiling:
+                assigned.append(lvl)
+            else:
+                new_overflow.append(lvl)
+        overflow = new_overflow
+
+        # Then draw from pool
+        new_pool = []
+        for lvl in pool:
+            if len(assigned) < needed and BLOOM_RANK[lvl] <= ceiling:
+                assigned.append(lvl)
+            else:
+                new_pool.append(lvl)
+        pool = new_pool
+
+        # If still short (no suitable levels left), cap overflow to this type's ceiling
+        # This happens when all remaining types are low-ceiling but high levels dominate
+        while len(assigned) < needed and (pool or overflow):
+            src = pool if pool else overflow
+            lvl = src.pop(0)
+            if src is overflow and lvl in overflow:
+                overflow.remove(lvl)
+            # Clamp to ceiling
+            clamped = lvl if BLOOM_RANK[lvl] <= ceiling else BLOOM_ORDER[ceiling]
+            assigned.append(clamped)
+
+        random.shuffle(assigned)
+        result[t] = assigned
+
+    return result
 
 
 async def generate_assessment(
@@ -293,7 +380,6 @@ async def generate_assessment(
         final_lo_str = "\n".join([f"- {lo}" for lo in unique_los])
     
     # 2. Format Bloom's Distribution
-    blooms_slots = None
     if not enable_blooms:
         blooms_str = "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
     elif not blooms_distribution:
@@ -307,11 +393,30 @@ async def generate_assessment(
         else:
             blooms_str = "Remember: 20%, Understand: 25%, Apply: 25%, Analyze: 20%, Evaluate: 10%"
     else:
-        # User defined — pre-assign per-question Bloom's slots for strict enforcement
-        actual_total = sum(question_type_counts.values()) if question_type_counts else total_questions
-        blooms_slots = compute_blooms_slots(blooms_distribution, actual_total)
-        slot_lines = "\n     ".join([f"Question {i+1}: {level}" for i, level in enumerate(blooms_slots)])
-        blooms_str = f"Per-question assignment (NON-NEGOTIABLE — write each question to match its assigned level):\n     {slot_lines}"
+        # Distribute bloom levels per question type so the LLM gets unambiguous assignments.
+        # A flat numbered list is unreliable because the LLM writes questions grouped by type,
+        # not as a flat sequence — it cannot map "Question N" to the right type bucket.
+        blooms_by_type = compute_blooms_by_type(blooms_distribution, question_type_counts or {})
+        type_label_map = {
+            "mcq": "Multiple Choice Questions (MCQ)",
+            "ftb": "Fill in the Blank Questions (FTB)",
+            "mtf": "Match the Following Questions (MTF)",
+            "multichoice": "Multi-Choice Questions",
+            "truefalse": "True/False Questions",
+        }
+        lines = []
+        for qtype, levels in blooms_by_type.items():
+            label = type_label_map.get(qtype, qtype)
+            level_str = ", ".join(levels)
+            lines.append(f"     {label} ({len(levels)} questions): {level_str}")
+        blooms_str = (
+            "Per-type Bloom's assignment (NON-NEGOTIABLE):\n"
+            "     For each question type below, assign the listed Bloom's levels IN ORDER\n"
+            "     to your questions of that type. The Nth level listed = the Nth question\n"
+            "     of that type. Write the question content to genuinely reflect that level.\n"
+            + "\n".join(lines)
+        )
+        logger.info(f"Blooms by type: { {k: v for k, v in blooms_by_type.items()} }")
 
     # 3. Format Topics
     topics_str = ", ".join(topic_names) if topic_names else "None specific (Cover all modules)"
