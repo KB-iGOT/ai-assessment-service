@@ -3,7 +3,7 @@
     "_postman_id": "e16ce47c-55ad-4bac-9455-820a6fcaaea1",
     "name": "iGOT AI Assessments",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "AI Assessment Generation Service\n\n**Environments:**\n- Local (direct):  set `base_url` = `http://localhost:8000/ai-assessments/v1`\n- UAT via Kong:    set `base_url` = `https://portal.uat.karmayogibharat.net/api/ai/assessments/v1`\n\n**Variables to set:**\n- `base_url`      \u2014 full base URL including version prefix (see above)\n- `auth_token`    \u2014 Keycloak JWT from iGot (x-authenticated-user-token)\n- `kong_api_key`  \u2014 Kong JWT credential (Authorization: bearer)\n- `job_id`        \u2014 paste Job ID returned from Generate to use in Status / Update / Download"
+    "description": "AI Assessment Generation Service\n\n**Environments:**\n- Local (direct):  set `base_url` = `http://localhost:8000/ai-assessments/v1`\n- UAT via Kong:    set `base_url` = `https://portal.uat.karmayogibharat.net/api/ai/assessments/v1`\n\n**Variables to set:**\n- `base_url`      — full base URL including version prefix (see above)\n- `auth_token`    — Keycloak JWT from iGot (x-authenticated-user-token)\n- `kong_api_key`  — Kong JWT credential (Authorization: bearer)\n- `job_id`        — paste Job ID returned from Generate to use in Status / Update / Download"
   },
   "variable": [
     {
@@ -19,12 +19,16 @@
     {
       "key": "kong_api_key",
       "value": "",
-      "description": "Kong JWT credential \u2014 goes in Authorization: bearer header"
+      "description": "Kong JWT credential — goes in Authorization: bearer header"
     },
     {
       "key": "job_id",
       "value": "",
-      "description": "Job ID returned from the Generate request \u2014 paste it here to use in Status / Update / Download"
+      "description": "Job ID returned from the Generate request — paste it here to use in Status / Update / Download"
+    },
+    {
+      "key": "question_id",
+      "value": "mcq_001"
     }
   ],
   "item": [
@@ -98,7 +102,7 @@
               "type": "text",
               "key": "time_limit",
               "value": "0",
-              "description": "Minutes \u2014 0 means no limit"
+              "description": "Minutes — 0 means no limit"
             },
             {
               "type": "text",
@@ -110,13 +114,13 @@
               "type": "text",
               "key": "course_weightage",
               "value": "",
-              "description": "Comprehensive only \u2014 JSON e.g. {\"do_1\":60,\"do_2\":40}"
+              "description": "Comprehensive only — JSON e.g. {\"do_1\":60,\"do_2\":40}"
             },
             {
               "type": "text",
               "key": "course_names",
               "value": "",
-              "description": "Optional \u2014 comma-separated course names matching the order of course_ids e.g. \"Course A,Course B\""
+              "description": "Optional — comma-separated course names matching the order of course_ids e.g. \"Course A,Course B\""
             },
             {
               "type": "text",
@@ -183,7 +187,208 @@
       "response": []
     },
     {
-      "name": "Update Assessment",
+      "name": "Edit Question",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request\": {\n    \"questionId\": \"{{question_id}}\",\n    \"version\": 1,\n    \"updates\": {\n      \"question_text\": \"Revised question text?\",\n      \"correct_option_index\": 2,\n      \"blooms_level\": \"Apply\",\n      \"relevance_percentage\": 88,\n      \"answer_rationale.correct_answer_explanation\": \"Option C is correct because ...\",\n      \"reasoning.learning_objective_alignment\": \"LO-3: Evaluate policy instruments\",\n      \"course_name\": \"Foundations of Public Policy\",\n      \"reasoning.competency_alignment.kcm.competency_area\": \"Behavioural\",\n      \"reasoning.competency_alignment.kcm.competency_theme\": \"Outcome Orientation\",\n      \"reasoning.competency_alignment.kcm.competency_sub_theme\": \"Accountability\"\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/questions/update/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "questions",
+            "update",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Add Question",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request\": {\n    \"questionType\": \"mcq\",\n    \"position\": 1,\n    \"version\": 1,\n    \"question\": {\n      \"question_text\": \"Which body approves the Union Budget?\",\n      \"options\": [\n        {\n          \"text\": \"Parliament\",\n          \"index\": 0\n        },\n        {\n          \"text\": \"NITI Aayog\",\n          \"index\": 1\n        },\n        {\n          \"text\": \"RBI\",\n          \"index\": 2\n        },\n        {\n          \"text\": \"Cabinet Secretariat\",\n          \"index\": 3\n        }\n      ],\n      \"correct_option_index\": 0,\n      \"blooms_level\": \"Remember\",\n      \"relevance_percentage\": 85,\n      \"difficulty_level\": \"intermediate\",\n      \"course_name\": \"Foundations of Public Policy\",\n      \"answer_rationale\": {\n        \"correct_answer_explanation\": \"Parliament approves the Union Budget.\",\n        \"why_factor\": \"Constitutional mandate\",\n        \"logic_justification\": \"Article 112\"\n      },\n      \"reasoning\": {\n        \"learning_objective_alignment\": \"LO-1: Identify budget authorities\",\n        \"competency_alignment\": {\n          \"kcm\": {\n            \"competency_area\": \"Functional\",\n            \"competency_theme\": \"Public Finance\",\n            \"competency_sub_theme\": \"Budgeting\"\n          }\n        }\n      }\n    }\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/questions/create/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "questions",
+            "create",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Delete Question",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/questions/delete/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "questions",
+            "delete",
+            "{{job_id}}"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request\": {\n    \"questionId\": \"{{question_id}}\",\n    \"version\": 1\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Reorder Questions",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"request\": {\n    \"questionOrder\": [\n      \"{{question_id}}\",\n      \"mcq_002\",\n      \"ftb_001\"\n    ],\n    \"version\": 1\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/questions/order/{{job_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "questions",
+            "order",
+            "{{job_id}}"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Audit Trail",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-authenticated-user-token",
+            "value": "{{auth_token}}"
+          },
+          {
+            "key": "Authorization",
+            "value": "bearer {{kong_api_key}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/audit/{{job_id}}?limit=200&offset=0",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "audit",
+            "{{job_id}}"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "200"
+            },
+            {
+              "key": "offset",
+              "value": "0"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update Whole Assessment (legacy)",
       "request": {
         "method": "PUT",
         "header": [
@@ -202,7 +407,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"assessment_data\": {}\n}",
+          "raw": "{\n  \"version\": 1,\n  \"assessment_data\": {}\n}",
           "options": {
             "raw": {
               "language": "json"
