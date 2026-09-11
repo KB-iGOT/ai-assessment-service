@@ -17,6 +17,7 @@ from .events import get_kafka_consumer, send_completion_event, stop_kafka_produc
 from .config import INTERACTIVE_COURSES_PATH
 from .storage import get_storage_service
 from . import tracing
+from .questions import normalize_assessment, PROV_AI_GENERATED
 
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)
@@ -145,18 +146,34 @@ async def process_job(payload: Dict[str, Any]):
             "additional_instructions": payload.get('additional_instructions'),
         }
 
-        # 6. Save Result
+        # 6. Bring the LLM output into the editable model before it is stored:
+        #    unique question ids, ai_generated provenance on every
+        #    question, and the authoritative `question_order` the editing
+        #    workspace and all exports read.
+        #
+        #    This is the only call that passes `rebase_option_indexes`. The prompt
+        #    and response schema both state that option indexes are zero-based, but
+        #    a model can still return 1..n; rebasing here — before anything has read
+        #    the assessment — is the last point at which the base can be settled
+        #    without a client ever having seen the other one.
+        assessment = normalize_assessment(
+            assessment,
+            default_provenance=PROV_AI_GENERATED,
+            rebase_option_indexes=True,
+        )
+
+        # 7. Save Result
         logger.info(f"[{job_id}] Saving metadata | course_ids={metadata.get('course_ids')} | course_names={metadata.get('course_names')}")
         await save_assessment_result(job_id, metadata, assessment, usage)
         logger.info(f"[{job_id}] Result saved to DB")
 
-        # 7. Cleanup uploaded files from storage after successful processing
+        # 8. Cleanup uploaded files from storage after successful processing
         if stored_paths_to_cleanup:
             storage = get_storage_service()
             for stored_path in stored_paths_to_cleanup:
                 storage.delete_file(stored_path)
 
-        # 8. Notify Completion
+        # 9. Notify Completion
         await send_completion_event(job_id, user_id, "COMPLETED", {"course_ids": course_ids})
         total_duration = round(time.monotonic() - t_start, 2)
         logger.info(f"[{job_id}] Job COMPLETED | total_duration={total_duration}s")
