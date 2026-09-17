@@ -513,3 +513,5 @@ curl -H 'x-authenticated-user-token: YOUR_JWT' \
 - **KCM Mapping**: All competency references must come from the authoritative 110-competency KCM dataset.
 - **Context Caching**: KCM competency descriptions are cached in Gemini to reduce per-request token costs.
 - **Multilingual Output**: All generated text (questions, options, reasoning) is produced in the user-selected language.
+
+
