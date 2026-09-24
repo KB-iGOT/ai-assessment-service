@@ -92,31 +92,13 @@ VALID_PROVENANCE = {PROV_AI_GENERATED, PROV_AI_ASSISTED, PROV_HUMAN_AUTHORED}
 
 BLOOMS_LEVELS = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"]
 
-# Answer-option counts. The floor and the ceiling have deliberately different
-# scopes.
-#
-# The floor applies to every save. A question with fewer than two options is not
-# answerable, so it is rejected wherever it came from. This is looser than the
-# generation prompt (resources/prompts.yaml), which asks for "4 options" on an
-# MCQ and "4 or more" on a MULTICHOICE and is left untouched — the prompt is a
-# generation target, not a save-time rule, and enforcing its count made a
-# legitimate 2- or 3-option question impossible to save.
+# Answer-option counts. A question with fewer than two options is not
+# answerable, so the floor is rejected wherever it came from. This is looser
+# than the generation prompt (resources/prompts.yaml), which asks for "4
+# options" on an MCQ and "4 or more" on a MULTICHOICE and is left untouched —
+# the prompt is a generation target, not a save-time rule, and enforcing its
+# count made a legitimate 2- or 3-option question impossible to save.
 MIN_OPTION_COUNT = 2
-
-# The ceiling applies only when a question is *authored* — `apply_question_add`,
-# and a question the whole-blob update introduces. Per bucket; None means no
-# ceiling even on add.
-#
-# Editing has no ceiling, and that asymmetry is the point. The MULTICHOICE prompt
-# sets no upper bound, so a generated question can legitimately carry six or more
-# options; a ceiling on the edit path would reject *every* save of such a
-# question — however unrelated the change — over an option count the reviewer
-# never chose, leaving it permanently uneditable. A question being authored from
-# scratch has no such history, so the ceiling is a fair constraint there.
-MAX_OPTION_COUNT_ON_ADD: Dict[str, Optional[int]] = {
-    BUCKET_MCQ: 5,
-    BUCKET_MULTICHOICE: 5,
-}
 
 def resolve_bucket(name: str) -> Optional[str]:
     """Accept a bucket name, a short type key, or a question_type const."""
