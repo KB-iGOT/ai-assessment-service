@@ -16,20 +16,29 @@ CSV_TYPE_BY_BUCKET = {
 }
 
 
+def _slot_count_v2(q: Dict[str, Any], q_type: str) -> int:
+    """How many Option/isOptionCorrect columns this question needs."""
+    if q_type in ("MCQ-SCA", "MCQ-MCA"):
+        return len(q.get("options", []) or [])
+    if q_type == "MTF":
+        return len(q.get("pairs", []) or [])
+    if q_type == "FTB":
+        correct_ans = q.get("correct_answer")
+        if isinstance(correct_ans, (dict, list)):
+            return len(correct_ans)
+        return 1
+    return 0  # T/F is fixed at 2, already covered by the floor below
+
+
 def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
     """
     Generates a CSV export with the specific V2 schema required by the user.
     Schema:
-    QuestionNo, QuestionType, Question, QuestionTagging, Option1, isOption1Correct, ... Option7, isOption7Correct
+    QuestionNo, QuestionType, Question, QuestionTagging, Option1, isOption1Correct, ... OptionN, isOptionNCorrect
+    N is at least 7, widened to fit whichever question in this assessment carries
+    the most options/pairs/blanks, so a question exceeding the old fixed 7 never
+    gets truncated.
     """
-    
-    # Define Header
-    headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging"]
-    for i in range(1, 8):
-        headers.extend([f"Option{i}", f"isOption{i}Correct"])
-        
-    rows = []
-    q_counter = 1
 
     # Flatten in the assessment's authoritative sequence, so the row order here
     # matches the PDF, DOCX and JSON exports.
@@ -41,6 +50,16 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
         }
         for bucket, q in iter_questions_in_order(assessment_data)
     ]
+
+    max_slots = max([7] + [_slot_count_v2(item["raw"], item["type"]) for item in all_questions])
+
+    # Define Header
+    headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging"]
+    for i in range(1, max_slots + 1):
+        headers.extend([f"Option{i}", f"isOption{i}Correct"])
+
+    rows = []
+    q_counter = 1
 
     for item in all_questions:
         q = item["raw"]
@@ -71,7 +90,7 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
            row["Question"] = q.get("matching_context", "Match the following items appropriately:")
         
         # Populate Options columns (Default empty)
-        for i in range(1, 8):
+        for i in range(1, max_slots + 1):
             row[f"Option{i}"] = ""
             row[f"isOption{i}Correct"] = ""
             
@@ -90,7 +109,7 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
             elif correct_idx is not None:
                 correct_set = {int(correct_idx)}
                 
-            for i, opt in enumerate(options[:7]):
+            for i, opt in enumerate(options[:max_slots]):
                 col_idx = i + 1
                 row[f"Option{col_idx}"] = opt.get("text", "")
                 # Match using the option's own index field. `normalize_assessment`
@@ -114,36 +133,23 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
         elif q_type == "MTF":
             # Map Pairs: Left -> OptionN, Right -> isOptionNCorrect
             pairs = q.get("pairs", [])
-            for i, pair in enumerate(pairs[:7]):
+            for i, pair in enumerate(pairs[:max_slots]):
                 col_idx = i + 1
                 row[f"Option{col_idx}"] = pair.get("left", "")
                 row[f"isOption{col_idx}Correct"] = pair.get("right", "")
 
         elif q_type == "FTB":
-            # Map blanks based on user example:
-            # Option1: <text>, isOption1Correct: Blank1
-            # But wait, internal FTB structure is usually a list of answers?
-            # Or is it a question text with _____?
-            # Let's check internal schema for FTB Question.
-            # Standard FTB usually has 'correct_answer' list or dict.
-            # We'll adapt: if 'blanks' list exists? 
-            # Or if 'correct_answer' is dict {"blank1": "val"}.
-            
-            # Simple assumption:
-            # Option{i}: Answer Text
-            # isOption{i}Correct: "Blank{i}"
-            
             correct_ans = q.get("correct_answer") # Could be string or list/dict
             if isinstance(correct_ans, dict):
                  # {"blank1": "val", "blank2": "val"}
                  for i, (k, v) in enumerate(correct_ans.items()):
-                     if i >= 7: break
+                     if i >= max_slots: break
                      col_idx = i + 1
                      row[f"Option{col_idx}"] = v
                      row[f"isOption{col_idx}Correct"] = f"Blank{col_idx}"
             elif isinstance(correct_ans, list):
                 for i, v in enumerate(correct_ans):
-                    if i >= 7: break
+                    if i >= max_slots: break
                     col_idx = i + 1
                     row[f"Option{col_idx}"] = v
                     row[f"isOption{col_idx}Correct"] = f"Blank{col_idx}"
@@ -165,16 +171,11 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
 def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
     """
     Basic CSV export — MCQ only (SCA + MCA), no QuestionType/QuestionTagging columns.
-    Columns: SR, Question, Option1..Option6, IsOption1Correct..IsOption6Correct
+    Columns: SR, Question, Option1..OptionN, IsOption1Correct..IsOptionNCorrect
+    N is at least 7, widened to fit whichever question in this assessment carries
+    the most options, so a question exceeding the floor never gets truncated.
     IsOptionNCorrect values: TRUE / FALSE
     """
-    headers = ["SR", "Question"]
-    for i in range(1, 7):
-        headers.extend([f"Option{i}", f"IsOption{i}Correct"])
-
-    rows = []
-    q_counter = 1
-
     # Ordered by the assessment's authoritative sequence, filtered to the MCQ
     # types this schema supports.
     all_questions = [
@@ -182,6 +183,15 @@ def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
         for bucket, q in iter_questions_in_order(assessment_data)
         if bucket in ("Multiple Choice Question", "Multi-Choice Question")
     ]
+
+    max_options = max([7] + [len(item["raw"].get("options", []) or []) for item in all_questions])
+
+    headers = ["SR", "Question"]
+    for i in range(1, max_options + 1):
+        headers.extend([f"Option{i}", f"IsOption{i}Correct"])
+
+    rows = []
+    q_counter = 1
 
     for item in all_questions:
         q = item["raw"]
@@ -191,7 +201,7 @@ def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
 
         row = {"SR": q_counter, "Question": q_text}
 
-        for i in range(1, 7):
+        for i in range(1, max_options + 1):
             row[f"Option{i}"] = ""
             row[f"IsOption{i}Correct"] = ""
 
@@ -203,7 +213,7 @@ def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
         elif correct_idx is not None:
             correct_set = {int(correct_idx)}
 
-        for i, opt in enumerate(options[:6]):
+        for i, opt in enumerate(options[:max_options]):
             col_idx = i + 1
             row[f"Option{col_idx}"] = opt.get("text", "")
             opt_index = int(opt["index"]) if opt.get("index") is not None else i
