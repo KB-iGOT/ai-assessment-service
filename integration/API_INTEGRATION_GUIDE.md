@@ -326,7 +326,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 | `provenance` | `ai_generated` (untouched AI output), `ai_assisted` (AI output a reviewer has edited), `human_authored` (added manually). Server-controlled; ignored if sent by a client. |
 | `course_name` | The course this question is derived from. `"User Uploaded Content"` for standalone assessments. |
 | `question_text` | The question text (MTF uses `matching_context` instead) |
-| `options` | List of `{ "text": "...", "index": 0 }` answer choices. MCQ and Multi-Choice must have **at least 2**, and **at most 5 when the question is being added**. `index` is **zero-based** — the first option is `0`. |
+| `options` | List of `{ "text": "...", "index": 0 }` answer choices. MCQ and Multi-Choice must have **at least 2** and **at most 5**. `index` is **zero-based** — the first option is `0`. |
 | `correct_option_index` | For MCQ, the single `index` of the correct option. For Multi-Choice, an array of correct `index` values. **Zero-based**, and matched against each option's own `index` field, not its array position. |
 | `correct_answer` | FTB: the answer text. True/False: `"True"` or `"False"`. |
 | `pairs` | MTF: list of `{ "left": "...", "right": "..." }`, at least 2. |
@@ -441,7 +441,7 @@ generic toasts, and `errors` for anything a user reads.
 
 So `{"code": "option_count_invalid", "params": {"minimum": 2, "maximum": 5, "found": 1}}`
 becomes "Needs between 2 and 5 options — this one has 1" in your string table.
-`maximum` is `null` when no ceiling applies, which is every edit of an existing question.
+`maximum` is `null` when the question type has no ceiling.
 
 `params` keys by code:
 
@@ -469,7 +469,7 @@ Validation covers the five limbs the specification names — question, answer, o
 | Limb | Rules |
 |---|---|
 | Question | Question text (or MTF matching context) cannot be empty. Answer rationale cannot be empty. `blooms_level` must be one of the six levels while Bloom's is enabled. `relevance_percentage` must be an integer 0–100. |
-| Option | MCQ and Multi-Choice must have **at least 2 options**, each with non-empty text and a unique integer `index`. A question being **added** must also have **at most 5** — editing an existing question has no ceiling, so a generated question carrying more options stays editable. MTF requires at least 2 complete pairs. |
+| Option | MCQ and Multi-Choice must have **at least 2 options**, each with non-empty text and a unique integer `index`. They must also have **at most 5**, on both add and edit. MTF requires at least 2 complete pairs. |
 | Answer | The correct answer must reference an existing option `index`. MCQ takes one index, Multi-Choice at least one. True/False must be `"True"` or `"False"`. FTB requires answer text. A question can never be left unscorable. |
 | Mapping | A mapping field cannot be blanked once set. The competency triple is all-or-nothing — area, theme and sub-theme together. The triple's values are free text and are not checked against the KCM dataset. |
 | Assessment | At least one question must remain. Question identifiers must be unique. |
@@ -512,6 +512,7 @@ const BUCKET_KEY = {
 };
 const OPTION_BUCKETS = ["Multiple Choice Question", "Multi-Choice Question"];
 const MIN_OPTIONS = 2;
+const MAX_OPTIONS = 5;
 
 function editorList(assessmentData) {
   const { question_order: order, questions } = assessmentData;
@@ -531,10 +532,9 @@ function editorList(assessmentData) {
       question_bucket: bucket,
       question_type_key: BUCKET_KEY[bucket] ?? bucket,
       option_count: optionCount,
-      // The edit path has NO option ceiling, so add is always available on an
-      // option-based question. The 5-option limit applies only to authoring a
-      // new one — enforce it in the add form, never in the editor.
-      can_add_option: hasOptions,
+      // The 5-option ceiling applies to both add and edit, so add turns off
+      // at the ceiling and remove at the floor.
+      can_add_option: hasOptions && optionCount < MAX_OPTIONS,
       can_remove_option: hasOptions && optionCount > MIN_OPTIONS,
       can_delete: total > 1,
     };
@@ -606,7 +606,7 @@ curl --location \
 |---|---|
 | `question_text` | All except MTF |
 | `matching_context` | MTF only |
-| `options` | MCQ, Multi-Choice — full replacement list, at least 2 items of `{text, index}` (no ceiling on edit) |
+| `options` | MCQ, Multi-Choice — full replacement list, 2 to 5 items of `{text, index}` |
 | `correct_option_index` | MCQ (integer), Multi-Choice (array of integers) |
 | `correct_answer` | FTB (text), True/False (`"True"` / `"False"`) |
 | `pairs` | MTF — full replacement list of `{left, right}` |

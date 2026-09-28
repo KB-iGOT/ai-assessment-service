@@ -100,6 +100,15 @@ BLOOMS_LEVELS = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Crea
 # count made a legitimate 2- or 3-option question impossible to save.
 MIN_OPTION_COUNT = 2
 
+# The ceiling applies to every save of a question — both adding and editing.
+# Per bucket; None means no ceiling. Note the MULTICHOICE prompt sets no upper
+# bound, so a generated question carrying more options than this must have
+# options removed before any edit to it can be saved.
+MAX_OPTION_COUNT: Dict[str, Optional[int]] = {
+    BUCKET_MCQ: 5,
+    BUCKET_MULTICHOICE: 5,
+}
+
 def resolve_bucket(name: str) -> Optional[str]:
     """Accept a bucket name, a short type key, or a question_type const."""
     if not name:

@@ -7,10 +7,11 @@ so a failed validation can never leave a half-written assessment behind.
 
 Field-level rules come from the source specification, with two clarifications
 applied:
-  * Answer-option counts have a floor of two on every save. The generation
-    prompt still asks for four, but that is a generation target, not a
-    save-time constraint on a human reviewer. See `MIN_OPTION_COUNT` in
-    questions.py.
+  * Answer-option counts have a floor of two and a ceiling of five on every
+    save, whether the question is being added or edited. The generation prompt
+    still asks for four, but that is a generation target, not a save-time
+    constraint on a human reviewer. See `MIN_OPTION_COUNT` /
+    `MAX_OPTION_COUNT` in questions.py.
   * An assessment must always contain at least one question.
 
 Errors carry machine-readable facts only — `code`, `field`, `question_id` and a
@@ -25,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .questions import (
     BLOOMS_LEVELS,
+    MAX_OPTION_COUNT,
     MIN_OPTION_COUNT,
     BUCKET_FTB,
     BUCKET_MCQ,
@@ -257,10 +259,11 @@ def _validate_options(bucket: str, question: Dict[str, Any],
         return [_err("options_required", "options", qid)]
 
     count = len(options)
-    if count < MIN_OPTION_COUNT:
+    ceiling = MAX_OPTION_COUNT.get(bucket)
+    if count < MIN_OPTION_COUNT or (ceiling is not None and count > ceiling):
         errors.append(_err(
             "option_count_invalid", "options", qid,
-            minimum=MIN_OPTION_COUNT, maximum=None, found=count,
+            minimum=MIN_OPTION_COUNT, maximum=ceiling, found=count,
         ))
 
     indexes: List[int] = []
@@ -410,10 +413,9 @@ def validate_assessment(
     save actually adds or changes. Assessment-level invariants — at least one
     question, unique identifiers — are always checked.
 
-    `new_question_ids` names the questions this save introduces, so the option
-    ceiling reaches a question added through the whole-blob path exactly as it
-    reaches one added through `POST /questions/create`. Questions the assessment
-    already held are validated without it.
+    `new_question_ids` names the questions this save introduces. The option
+    ceiling no longer depends on it — it applies to added and edited questions
+    alike.
 
     The restriction matters for existing data. `blooms_level`, for instance, was
     never a required field in resources/schemas.json, so an assessment generated
