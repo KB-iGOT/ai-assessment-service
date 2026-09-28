@@ -1308,7 +1308,10 @@ async def extract_vtt_text(vtt_path: Path) -> str:
             raw = vtt_path.read_text(encoding='utf-8')
         except Exception:
             raw = vtt_path.read_text(encoding='latin-1')
-            
+        # NULs (e.g. from a UTF-16 file decoded as UTF-8) would otherwise be
+        # copied by the LLM into questions that Postgres jsonb cannot store.
+        raw = raw.replace('\x00', '')
+
         for line in raw.splitlines():
             line = line.strip()
             if not line or line.upper().startswith('WEBVTT') or '-->' in line or line.isdigit():
@@ -1325,7 +1328,8 @@ def extract_pdf_text_sync(pdf_path: Path) -> str:
     try:
         doc = fitz.open(str(pdf_path))
         for page in doc:
-            page_text = page.get_text().strip()
+            # PyMuPDF emits NUL for glyphs it cannot map; see extract_vtt_text.
+            page_text = page.get_text().replace('\x00', '').strip()
             if page_text:
                 text_parts.append(page_text)
         doc.close()

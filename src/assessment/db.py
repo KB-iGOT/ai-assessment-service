@@ -67,8 +67,26 @@ MIGRATIONS_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_assessment_audit_job ON interactive_assessment_audit (job_id, id);",
 ]
 
+def _strip_nul(value):
+    """
+    Recursively remove NUL characters from every string in `value`.
+
+    Postgres text cannot hold U+0000, so jsonb rejects the `\\u0000` escape that
+    json.dumps emits for it ("unsupported Unicode escape sequence") and the
+    whole write fails. NULs reach us from course content — PyMuPDF emits them
+    for unmappable glyphs, mis-decoded VTTs are full of them — and the LLM
+    copies them into questions, so they are dropped here for every jsonb write.
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {_strip_nul(k): _strip_nul(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_strip_nul(v) for v in value]
+    return value
+
 def _json_encoder(value):
-    return json.dumps(value)
+    return json.dumps(_strip_nul(value))
 
 def _json_decoder(value):
     return json.loads(value)
