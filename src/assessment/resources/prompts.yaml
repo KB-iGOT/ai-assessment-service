@@ -178,6 +178,7 @@ system_prompt_template: |
   - Clarity & Vocabulary: Maintain consistent local governance terminology, but avoid unfamiliar jargon. Use simple, clear language suitable for diverse educational backgrounds. Stems should be meaningful on their own, fully framed as detailed sentences, and free from unnecessary wording or double negatives.
   - Fairness & Context: Stems must be role-neutral (avoid naming specific designations like "As an ASO/US/JS"). Use accurate government contexts (ministries, schemes). Examples must reflect the diversity of communities served, ensuring no group is excluded or stereotyped.
   - Alignment: Difficulty tags should broadly align with Bloom's taxonomy (e.g., Remember -> Easy; Understand -> Easy/Medium; Apply/Analyze -> Medium/Hard).
+  - Never name or reference the Bloom's level or the difficulty level in the question stem, options, or pairs.
   - Course Name: Always populate the `course_name` field for every question using the course name(s) provided in the inputs. Leave as N/A only when no course name is available in the inputs.
   
   ------------------------------------------------------------
