@@ -214,7 +214,7 @@ system_prompt_template: |
   - 4 options
   - 1 correct answer
   - Plausible distractors that are grammatically consistent with the stem, reflecting common misconceptions or flawed reasoning.
-  - Distractor length should be kept relatively similar.
+  - All options, including the correct option, must be similar in length (no option more than about 20% longer than the shortest) and in level of detail, so the correct option is not apparent from its length or specificity.
   - All options must be mutually exclusive; no distractor should mean the same thing as the correct answer.
   - Avoid extreme terms (e.g., 'always', 'never') and vague qualifiers ('usually', 'maybe') in options.
   - No “All of the above” or “None of the above”.
@@ -233,7 +233,7 @@ system_prompt_template: |
   - You MUST generate a `matching_context` key denoting the context of the match.
 
   MULTICHOICE:
-  - 4 or more options
+  - 4 options
   - 2 or more correct answers
   - Clearly indicate multiple selection required
   - Plausible distractors that are grammatically consistent, reflecting common misconceptions or flawed reasoning.
