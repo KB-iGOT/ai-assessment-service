@@ -33,6 +33,7 @@ predate these fields, so no database migration of `assessment_data` is needed.
 from __future__ import annotations
 
 import copy
+import random
 import uuid
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -255,6 +256,77 @@ def _normalize_option_indexes(question: Dict[str, Any], *, rebase: bool = False)
 
     if rebase:
         _rebase_option_indexes(question)
+
+
+_ANSWER_POSITION_RNG = random.SystemRandom()
+
+
+def _balanceable_option_count(question: Dict[str, Any]) -> int:
+    """
+    Option count of an MCQ that can be safely reordered, else 0.
+
+    Only a clean question qualifies: options indexed exactly 0..n-1 and a single
+    integer answer key naming one of them. Anything damaged is left as generated
+    so validation reports it, rather than being renumbered into a different but
+    still-wrong state.
+    """
+    options = question.get("options")
+    if not isinstance(options, list) or len(options) < MIN_OPTION_COUNT:
+        return 0
+    if not all(isinstance(o, dict) and type(o.get("index")) is int for o in options):
+        return 0
+    if sorted(o["index"] for o in options) != list(range(len(options))):
+        return 0
+    correct = question.get("correct_option_index")
+    if type(correct) is not int or not 0 <= correct < len(options):
+        return 0
+    return len(options)
+
+
+def _move_correct_option(question: Dict[str, Any], target: int, rng: random.Random) -> None:
+    options = question["options"]
+    correct = next(o for o in options if o["index"] == question["correct_option_index"])
+    reordered = [o for o in options if o is not correct]
+    rng.shuffle(reordered)
+    reordered.insert(target, correct)
+    for position, option in enumerate(reordered):
+        option["index"] = position
+    question["options"] = reordered
+    question["correct_option_index"] = target
+
+
+def balance_mcq_answer_positions(
+    assessment_data: Dict[str, Any], rng: Optional[random.Random] = None,
+) -> None:
+    """
+    Reorder MCQ options in place so the correct answer's position is spread
+    evenly across the assessment: within each option count, every position is
+    correct either floor(N/n) or ceil(N/n) times. Which question gets which
+    position, and the order of the distractors, is random.
+
+    Fresh LLM output only — called once by worker_service.py before the first
+    save. Never apply to a stored assessment: reordering options under a client
+    that already holds the question would change which option its answer key
+    selects. Multi-Choice and the other types are untouched.
+    """
+    rng = rng or _ANSWER_POSITION_RNG
+    mcqs = (assessment_data.get("questions") or {}).get(BUCKET_MCQ)
+    if not isinstance(mcqs, list):
+        return
+
+    by_option_count: Dict[int, List[Dict[str, Any]]] = {}
+    for question in mcqs:
+        if isinstance(question, dict):
+            count = _balanceable_option_count(question)
+            if count:
+                by_option_count.setdefault(count, []).append(question)
+
+    for count, group in by_option_count.items():
+        full_cycles, remainder = divmod(len(group), count)
+        targets = list(range(count)) * full_cycles + rng.sample(range(count), remainder)
+        rng.shuffle(targets)
+        for question, target in zip(group, targets):
+            _move_correct_option(question, target, rng)
 
 
 # Spellings accepted for a True/False answer, mapped to the canonical form.

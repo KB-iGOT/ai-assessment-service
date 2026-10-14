@@ -17,7 +17,7 @@ from .events import get_kafka_consumer, send_completion_event, stop_kafka_produc
 from .config import INTERACTIVE_COURSES_PATH
 from .storage import get_storage_service
 from . import tracing
-from .questions import normalize_assessment, PROV_AI_GENERATED
+from .questions import normalize_assessment, balance_mcq_answer_positions, PROV_AI_GENERATED
 
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)
@@ -161,6 +161,9 @@ async def process_job(payload: Dict[str, Any]):
             default_provenance=PROV_AI_GENERATED,
             rebase_option_indexes=True,
         )
+        # Must follow the rebase (it needs zero-based indexes) and precede the
+        # save, so the stored copy and the `ai_original_data` audit copy match.
+        balance_mcq_answer_positions(assessment)
 
         # 7. Save Result
         logger.info(f"[{job_id}] Saving metadata | course_ids={metadata.get('course_ids')} | course_names={metadata.get('course_names')}")

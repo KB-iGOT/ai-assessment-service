@@ -214,11 +214,10 @@ system_prompt_template: |
   - 4 options
   - 1 correct answer
   - Plausible distractors that are grammatically consistent with the stem, reflecting common misconceptions or flawed reasoning.
-  - All options, including the correct option, must be similar in length (no option more than about 20% longer than the shortest) and in level of detail, so the correct option is not apparent from its length or specificity.
+  - All options, including the correct option, must be similar in length (no option more than 20% longer than the shortest) and in level of detail, so the correct option is not apparent from its length or specificity. Apply this rule to every MCQ.
   - All options must be mutually exclusive; no distractor should mean the same thing as the correct answer.
   - Avoid extreme terms (e.g., 'always', 'never') and vague qualifiers ('usually', 'maybe') in options.
   - No “All of the above” or “None of the above”.
-  - Ensure the correct option is evenly distributed across all indices. The number of correct options at each index should be approximately equal, with no single index significantly overrepresented.
 
   FTB:
   - Exact and unambiguous
