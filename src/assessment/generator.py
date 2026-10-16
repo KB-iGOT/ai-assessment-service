@@ -20,10 +20,20 @@ from .config import (
     DATABASE_URL,
     GOOGLE_PROJECT_ID, GOOGLE_LOCATION, GENAI_MODEL_NAME,
     GOOGLE_APPLICATION_CREDENTIALS, PROMPT_VERSION, INTERACTIVE_COURSES_PATH,
-    QUESTION_BATCH_SIZE, BATCH_MAX_ATTEMPTS, ENABLE_QUESTION_BATCHING,
+    QUESTION_BATCH_SIZE, BATCH_MAX_ATTEMPTS, ENABLE_QUESTION_BATCHING, TOPUP_MAX_ROUNDS,
 )
 from .batching import Batch, apportion, merge_batches, plan_batches, summarize_for_dedup
-from .questions import BUCKET_BY_TYPE_KEY
+from .questions import new_question_id
+from .response_recovery import (
+    Buckets,
+    count_by_type,
+    extract_buckets,
+    remaining_blooms,
+    remaining_course_counts,
+    requested_counts,
+    shortfall,
+    trim_to_counts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -678,6 +688,47 @@ async def generate_assessment(
         except json.JSONDecodeError:
             logger.error("Failed to parse LLM response as JSON")
             raise ValueError("LLM response was not valid JSON")
+
+        # 7. Bring the per-type counts to the request. A response whose counts
+        #    already match is returned exactly as the model wrote it. Nothing
+        #    here may fail the job: on any error the response is returned as
+        #    generated, exactly as before this step existed.
+        try:
+            blueprint = result_json.get("blueprint") if isinstance(result_json, dict) else None
+            reconciled = await _reconcile_counts(
+                extract_buckets(result_json),
+                blueprint if isinstance(blueprint, dict) else {},
+                question_type_counts=question_type_counts,
+                requested_total=requested_total,
+                blooms_by_type=blooms_by_type,
+                blooms_str=blooms_str,
+                course_weightage=course_weightage,
+                aggregated_metadata=aggregated_metadata,
+                shared_prompt_inputs=shared_prompt_inputs,
+                job_id=composite_id,
+            )
+            if reconciled:
+                questions, blueprint, topup_usages = reconciled
+                # The model's blueprint tallied the questions it wrote, not the
+                # set kept, so its counted fields are recounted — as the batched
+                # path always does.
+                reconciled_json = dict(result_json) if isinstance(result_json, dict) else {}
+                reconciled_json["questions"] = questions
+                reconciled_json["blueprint"] = _recount_generated_fields(
+                    blueprint, questions,
+                    assessment_type=assessment_type,
+                    difficulty_level=difficulty_level,
+                    input_language=input_language,
+                    aggregated_metadata=aggregated_metadata,
+                    time_limit=time_limit,
+                )
+                reconciled_usage = _merge_usage([usage] + topup_usages) if topup_usages else usage
+                result_json, usage = reconciled_json, reconciled_usage
+        except Exception:
+            logger.exception(
+                f"[{composite_id}] Count reconciliation failed — returning the "
+                f"response as generated"
+            )
     else:
         # ---- Batched path ----
         result_json, usage = await _generate_in_batches(
@@ -740,18 +791,125 @@ async def _generate_in_batches(
             + (f" | courses {batch.course_counts}" if batch.course_counts else "")
         )
 
-    digest: List[Dict[str, str]] = []
-    payloads: List[Any] = []
-    usages: List[Any] = []
+    payloads, usages = await _run_batches(
+        batches,
+        digest=[],
+        question_type_counts=question_type_counts,
+        requested_total=requested_total,
+        blooms_str=blooms_str,
+        course_weightage=course_weightage,
+        batch_prompt_inputs=_batch_prompt_inputs(shared_prompt_inputs, requested_total),
+        job_id=job_id,
+    )
 
-    # Section 10 asks the model to set question depth against the time available.
-    # The limit is the whole assessment's but a batch holds a slice, so left as-is
-    # a 25-question batch divides the whole budget by its own volume and reads a
-    # per-question allowance several times larger than the real one.
+    if not payloads:
+        raise RuntimeError(f"Every question batch failed for job {job_id}")
+
+    merged_questions = merge_batches(payloads)
+
+    # The last batch to SUCCEED carries the blueprint. When the run was cut short
+    # that batch was not the final one and has none; the last top-up call then
+    # authors it, and failing that `_recount_generated_fields` fills in what can
+    # be counted; exporters already fall back to "N/A" for the three fields they
+    # read.
+    last = payloads[-1] if isinstance(payloads[-1], dict) else {}
+    blueprint = last.get("blueprint") if isinstance(last.get("blueprint"), dict) else {}
+
+    # Either a batch was abandoned above, or one returned a different number of
+    # questions of some type than it was told to. Nothing here may fail the
+    # job: on any error the merged batches are returned as generated, exactly
+    # as before this step existed.
+    try:
+        reconciled = await _reconcile_counts(
+            extract_buckets({"questions": merged_questions}),
+            blueprint,
+            question_type_counts=question_type_counts,
+            requested_total=requested_total,
+            blooms_by_type=blooms_by_type,
+            blooms_str=blooms_str,
+            course_weightage=course_weightage,
+            aggregated_metadata=aggregated_metadata,
+            shared_prompt_inputs=shared_prompt_inputs,
+            job_id=job_id,
+        )
+    except Exception:
+        logger.exception(
+            f"[{job_id}] Count reconciliation failed — returning the batches "
+            f"as generated"
+        )
+        reconciled = None
+    if reconciled:
+        merged_questions, blueprint, topup_usages = reconciled
+        usages.extend(topup_usages)
+
+    produced = sum(len(v) for v in merged_questions.values())
+    if not blueprint:
+        logger.warning(
+            f"[{job_id}] No blueprint in the final batch response — the run was cut "
+            f"short, or the model omitted it. Emitting the counted fields only."
+        )
+
+    assessment = {
+        "blueprint": _recount_generated_fields(
+            blueprint, merged_questions,
+            assessment_type=shared_prompt_inputs.get("assessment_type"),
+            difficulty_level=shared_prompt_inputs.get("difficulty_level"),
+            input_language=shared_prompt_inputs.get("input_language"),
+            aggregated_metadata=aggregated_metadata,
+            time_limit=time_limit,
+        ),
+        "questions": merged_questions,
+    }
+
+    usage = _merge_usage(usages)
+    logger.info(
+        f"[{job_id}] Batched generation complete | {produced} questions | "
+        f"{len(usages)} calls | total_tokens={usage.get('total_token_count', 'N/A')}"
+    )
+    return assessment, usage
+
+
+def _batch_prompt_inputs(
+    shared_prompt_inputs: Dict[str, Any],
+    requested_total: int,
+) -> Dict[str, Any]:
+    """
+    `shared_prompt_inputs` as rendered for a call that holds only PART of the
+    assessment — every batch, and every top-up call on either path.
+
+    Section 10 asks the model to set question depth against the time available.
+    The limit is the whole assessment's but a batch holds a slice, so left as-is
+    a 25-question batch divides the whole budget by its own volume and reads a
+    per-question allowance several times larger than the real one.
+    """
     batch_prompt_inputs = dict(shared_prompt_inputs)
     batch_prompt_inputs["time_to_complete"] = _format_batch_time_limit(
         shared_prompt_inputs.get("time_to_complete"), requested_total,
     )
+    return batch_prompt_inputs
+
+
+async def _run_batches(
+    batches: List[Batch],
+    *,
+    digest: List[Dict[str, str]],
+    question_type_counts: Dict[str, int],
+    requested_total: int,
+    blooms_str: str,
+    course_weightage: Optional[Any],
+    batch_prompt_inputs: Dict[str, Any],
+    job_id: Optional[str],
+    label: str = "",
+) -> Tuple[List[Any], List[Any]]:
+    """
+    Generate `batches` one after another. Each is shown `digest` — the questions
+    already generated — which is extended in place as batches complete.
+
+    Returns the payloads and usages of the batches that succeeded, stopping at
+    the first that fails after its retries.
+    """
+    payloads: List[Any] = []
+    usages: List[Any] = []
 
     for batch in batches:
         prompt = build_prompt(
@@ -788,8 +946,8 @@ async def _generate_in_batches(
             # remaining call an incomplete picture — and each one costs minutes
             # on a job already known to come up short.
             logger.error(
-                f"[{job_id}] {batch.describe()} failed after retries — keeping the "
-                f"{len(payloads)} batch(es) already generated | {exc}"
+                f"[{job_id}] {label}{batch.describe()} failed after retries — keeping "
+                f"the {len(payloads)} batch(es) already generated | {exc}"
             )
             break
 
@@ -797,62 +955,130 @@ async def _generate_in_batches(
         usages.append(usage)
         digest.extend(summarize_for_dedup(payload))
         logger.info(
-            f"[{job_id}] {batch.describe()} complete | "
+            f"[{job_id}] {label}{batch.describe()} complete | "
             f"{len(digest)}/{requested_total} questions so far"
         )
 
-    if not payloads:
-        raise RuntimeError(f"Every question batch failed for job {job_id}")
+    return payloads, usages
 
-    merged_questions = merge_batches(payloads)
 
-    produced = sum(len(v) for v in merged_questions.values())
-    if produced != requested_total:
-        # Either a batch was abandoned above, or one returned fewer questions than
-        # it was told to. Surfaced rather than repaired — a corrective pass is a
-        # separate decision, and the counts are what the caller asked for.
-        shortfall: Dict[str, int] = {}
-        for type_key, bucket in BUCKET_BY_TYPE_KEY.items():
-            asked = int((question_type_counts or {}).get(type_key) or 0)
-            missing = asked - len(merged_questions.get(bucket, []))
-            if asked and missing:
-                shortfall[type_key] = missing
-        logger.warning(
-            f"[{job_id}] Batched generation produced {produced} questions, "
-            f"{requested_total} were requested. Shortfall by type: "
-            f"{shortfall or 'none — a batch returned an unrequested type'}"
-        )
+async def _reconcile_counts(
+    pool: Buckets,
+    blueprint: Dict[str, Any],
+    *,
+    question_type_counts: Dict[str, int],
+    requested_total: int,
+    blooms_by_type: Dict[str, List[str]],
+    blooms_str: str,
+    course_weightage: Optional[Any],
+    aggregated_metadata: Dict[str, Any],
+    shared_prompt_inputs: Dict[str, Any],
+    job_id: Optional[str],
+) -> Optional[Tuple[Buckets, Dict[str, Any], List[Any]]]:
+    """
+    Bring the generated questions to the requested per-type counts.
 
-    # The last batch to SUCCEED carries the blueprint. When the run was cut short
-    # that batch was not the final one and has none, so the blueprint is empty and
-    # `_recount_generated_fields` fills in what can be counted; exporters already
-    # fall back to "N/A" for the three fields they read.
-    last = payloads[-1] if isinstance(payloads[-1], dict) else {}
-    blueprint = last.get("blueprint") if isinstance(last.get("blueprint"), dict) else {}
-    if not blueprint:
-        logger.warning(
-            f"[{job_id}] No blueprint in the final batch response — the run was cut "
-            f"short, or the model omitted it. Emitting the counted fields only."
-        )
+    Runs only when some type's count differs from the request, or a type that
+    was not requested is present — which covers every case where the total is
+    off. Returns None otherwise, and the caller keeps its output untouched.
 
-    assessment = {
-        "blueprint": _recount_generated_fields(
-            blueprint, merged_questions,
-            assessment_type=shared_prompt_inputs.get("assessment_type"),
-            difficulty_level=shared_prompt_inputs.get("difficulty_level"),
-            input_language=shared_prompt_inputs.get("input_language"),
-            aggregated_metadata=aggregated_metadata,
-            time_limit=time_limit,
-        ),
-        "questions": merged_questions,
-    }
+      * Extras are trimmed (`trim_to_counts`): only from a type over its count,
+        only as many as it is over by, choosing which go by the Bloom's and
+        course distributions.
+      * A shortfall is generated as NEW calls, after all the original ones,
+        planned with `plan_batches` exactly as a request would be — so a large
+        shortfall is still split at QUESTION_BATCH_SIZE. Each call asks for the
+        missing count per type, the type's assigned Bloom's levels not yet used
+        by the kept questions, and the course quantities not yet met; and is
+        shown every kept question so it does not repeat them.
+      * The top-up output is trimmed the same way, and the next round fills
+        whatever is still short, up to TOPUP_MAX_ROUNDS.
 
-    usage = _merge_usage(usages)
-    logger.info(
-        f"[{job_id}] Batched generation complete | {produced} questions | "
-        f"{len(payloads)} batches | total_tokens={usage.get('total_token_count', 'N/A')}"
+    If no blueprint exists yet (a batched run cut short before its last batch),
+    the last top-up call authors it.
+
+    Returns (questions, blueprint, top-up usages).
+    """
+    wanted = requested_counts(question_type_counts)
+    if count_by_type(pool) == wanted:
+        return None
+
+    course_targets = course_counts_from_weightage(course_weightage, requested_total)
+    trim_inputs = dict(
+        blooms_by_type=blooms_by_type,
+        course_counts=course_targets,
+        aggregated_metadata=aggregated_metadata,
     )
-    return assessment, usage
+    logger.warning(
+        f"[{job_id}] Generated counts {count_by_type(pool)} differ from the "
+        f"requested {wanted} — reconciling"
+    )
+
+    kept, dropped = trim_to_counts(pool, wanted, **trim_inputs)
+    if dropped:
+        logger.info(f"[{job_id}] Trimmed extras by type: {dropped}")
+
+    batch_prompt_inputs = _batch_prompt_inputs(shared_prompt_inputs, requested_total)
+    usages: List[Any] = []
+
+    for round_no in range(1, max(0, TOPUP_MAX_ROUNDS) + 1):
+        missing = shortfall(wanted, kept)
+        if not missing:
+            break
+
+        blooms = remaining_blooms(blooms_by_type, kept, missing)
+        courses = remaining_course_counts(
+            course_targets, kept, sum(missing.values()), aggregated_metadata,
+        )
+        logger.warning(
+            f"[{job_id}] Top-up round {round_no}/{TOPUP_MAX_ROUNDS} | missing {missing}"
+            + (f" | Bloom's {blooms}" if blooms else "")
+            + (f" | courses {courses}" if courses else "")
+        )
+
+        batches = plan_batches(missing, blooms, courses or None)
+        for batch in batches:
+            batch.is_final = False
+        if batches and not blueprint:
+            batches[-1].is_final = True
+
+        payloads, round_usages = await _run_batches(
+            batches,
+            digest=summarize_for_dedup({"questions": kept}),
+            question_type_counts=question_type_counts,
+            requested_total=requested_total,
+            blooms_str=blooms_str,
+            course_weightage=course_weightage,
+            batch_prompt_inputs=batch_prompt_inputs,
+            job_id=job_id,
+            label=f"top-up {round_no} ",
+        )
+        usages.extend(round_usages)
+
+        for payload in payloads:
+            for bucket, questions in extract_buckets(payload).items():
+                # Each top-up call numbers its questions from one, like the
+                # original call did, so fresh ids keep them from colliding.
+                for question in questions:
+                    question["question_id"] = new_question_id()
+                kept[bucket].extend(questions)
+            if not blueprint and isinstance(payload, dict) and isinstance(payload.get("blueprint"), dict):
+                blueprint = payload["blueprint"]
+
+        kept, dropped = trim_to_counts(kept, wanted, **trim_inputs)
+        if dropped:
+            logger.info(f"[{job_id}] Top-up round {round_no} trimmed extras by type: {dropped}")
+
+    missing = shortfall(wanted, kept)
+    if missing:
+        logger.error(
+            f"[{job_id}] Still short of the request after top-up — missing {missing}; "
+            f"returning {sum(len(v) for v in kept.values())}/{requested_total} questions"
+        )
+    else:
+        logger.info(f"[{job_id}] Counts reconciled to the request {wanted}")
+
+    return kept, blueprint, usages
 
 
 def _format_batch_time_limit(
