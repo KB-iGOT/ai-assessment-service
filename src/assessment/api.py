@@ -232,6 +232,14 @@ async def generate_v1(
     ]
     if files:
          param_list.extend([f.filename for f in valid_files])
+    # Competency assessments differ by area/themes/sub-themes alone, so those
+    # must be part of the signature or two different competency requests share
+    # a cache entry.
+    if assessment_type == AssessmentType.COMPETENCY:
+        param_list.extend([
+            str(competency_area), str(sorted(parsed_competency_themes)),
+            str(sorted(parsed_competency_sub_themes)),
+        ])
 
     param_str = "_".join(param_list)
     param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
