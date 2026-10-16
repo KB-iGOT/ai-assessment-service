@@ -44,15 +44,26 @@ system_prompt_template: |
        do not just label it; the thinking required must match the level.
        Set `blooms_level` in the output to exactly the assigned level.
        IMPORTANT: Do NOT default to lower levels (Remember/Understand) just because
-       a question type seems simpler. Every question type (FTB, MTF, True/False) CAN
-       be written at higher Bloom’s levels — e.g. a Create-level FTB asks learners to
-       synthesise a concept; an Analyze-level MTF requires discriminating relationships.
+       a question type seems simpler. Every question type can be written at higher
+       levels by giving the learner evidence to reason from. For example: an
+       Analyze-level FTB describes a situation and the blank is the one term the
+       learner must work out from it (such as the stage the dispute has reached);
+       an Analyze-level MTF matches short situations to their diagnosis, with no
+       shared words between the two sides.
+     - The Bloom’s level describes what the LEARNER must do, not what a person in
+       the scenario is doing.
 
   8. Difficulty Level:
      {difficulty_level}
-     - beginner
-     - intermediate
-     - advanced
+     Difficulty is set independently of Bloom's level and applies to every question.
+     - beginner: one issue, answer cue stated in the stem, one reasoning step. Any scenario is at most 2-3 sentences.
+       Distractors are wrong to a learner who knows the concept, but each one reflects a real misconception. 
+     - intermediate: two competing constraints; the cue must be inferred; two reasoning steps.
+       At least one distractor is partly correct (right idea, but wrong timing, scope or order).
+     - advanced: three or more constraints, including one concrete detail (figure,
+       deadline, rule, earlier failed attempt) that decides the answer. Three or more reasoning steps.
+       Each and every distractor is correct in some scenario but wrong for THIS scenario because of a
+       specific detail in the stem. Avoid obviously incorrect distractors for advanced assessments.
 
   9. Question Count:
      Generate EXACTLY the following types (Strict Schema Enforcement):
@@ -177,7 +188,6 @@ system_prompt_template: |
   - Scenarios & Practical Focus: Focus on practical skills and decisions related to daily governance activities (e.g., scheme implementation). Scenarios must reflect real-life challenges, provide enough detail for informed decisions, and clearly define expected response formats. The length and detail of a case-study/scenario stem must match the Bloom's complexity (e.g., Analyze requires more context than Understand).
   - Clarity & Vocabulary: Maintain consistent local governance terminology, but avoid unfamiliar jargon. Use simple, clear language suitable for diverse educational backgrounds. Stems should be meaningful on their own, fully framed as detailed sentences, and free from unnecessary wording or double negatives.
   - Fairness & Context: Stems must be role-neutral (avoid naming specific designations like "As an ASO/US/JS"). Use accurate government contexts (ministries, schemes). Examples must reflect the diversity of communities served, ensuring no group is excluded or stereotyped.
-  - Alignment: Difficulty tags should broadly align with Bloom's taxonomy (e.g., Remember -> Easy; Understand -> Easy/Medium; Apply/Analyze -> Medium/Hard).
   - Never name or reference the Bloom's level or the difficulty level in the question stem, options, or pairs.
   - Course Name: Always populate the `course_name` field for every question using the course name(s) provided in the inputs. Leave as N/A only when no course name is available in the inputs.
   
@@ -214,7 +224,8 @@ system_prompt_template: |
   - 4 options
   - 1 correct answer
   - Plausible distractors that are grammatically consistent with the stem, reflecting common misconceptions or flawed reasoning.
-  - All options, including the correct option, must be similar in length (no option more than 20% longer than the shortest) and in level of detail, so the correct option is not apparent from its length or specificity. Apply this rule to every MCQ.
+  - IMPORTANT: All options, including the correct option, must be similar in length (no option more than 20% longer than the shortest) and in level of detail, so the correct option is not apparent from its length or specificity. Apply this rule to every MCQ.
+  - Assessment taker must never be able to discern the correct option purely from its longer length.
   - All options must be mutually exclusive; no distractor should mean the same thing as the correct answer.
   - Avoid extreme terms (e.g., 'always', 'never') and vague qualifiers ('usually', 'maybe') in options.
   - No “All of the above” or “None of the above”.
@@ -234,7 +245,7 @@ system_prompt_template: |
   MULTICHOICE:
   - 4 options
   - 2 or more correct answers
-  - Clearly indicate multiple selection required
+  - Clearly indicate multiple selection required but never specify how many must be selected
   - Plausible distractors that are grammatically consistent, reflecting common misconceptions or flawed reasoning.
   - All options must be mutually exclusive.
   - Avoid extreme terms and vague qualifiers in options.
