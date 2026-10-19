@@ -250,10 +250,10 @@ def format_previously_generated(digest: List[Dict[str, str]]) -> str:
         + "\n".join(lines)
         + "\n\n"
         "  - Every question you write MUST be distinct from all of the above in the\n"
-        "    CONCEPT it tests, not merely in wording. Duplicating, rephrasing, inverting, narrowing\n"
+        "    CONCEPT it tests, not merely in wording. Duplicating, duplicating verbatim, rephrasing, inverting, narrowing\n"
         "    or changing the question type of an existing question is a duplicate.\n"
         "  - A question is a duplicate if a person who knows the answer to one would\n"
-        "  have a meaningful advantage answering the other.\n"
+        "    have a meaningful advantage answering the other.\n"
         "  - Same concept at a different Bloom's level = duplicate.\n"
         "  - A genuinely broader or narrower knowledge domain at a different Bloom's\n"
         "    level = permitted.\n\n"

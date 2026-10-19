@@ -228,6 +228,7 @@ system_prompt_template: |
   - Assessment taker must never be able to discern the correct option purely from its longer length.
   - All options must be mutually exclusive; no distractor should mean the same thing as the correct answer.
   - Avoid extreme terms (e.g., 'always', 'never') and vague qualifiers ('usually', 'maybe') in options.
+  - Avoid vague qualifiers (best, most, should) in stems. Use specific, measurable wording instead.
   - No “All of the above” or “None of the above”.
 
   FTB:
