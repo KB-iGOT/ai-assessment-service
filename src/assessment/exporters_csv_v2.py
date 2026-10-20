@@ -4,7 +4,7 @@ import re
 from typing import Dict, List, Any
 from pathlib import Path
 
-from .questions import iter_questions_in_order
+from .questions import BUCKET_FTB, is_legacy_ftb, iter_questions_in_order
 
 # Internal bucket name -> the type code used in the iGot import schema.
 CSV_TYPE_BY_BUCKET = {
@@ -16,9 +16,20 @@ CSV_TYPE_BY_BUCKET = {
 }
 
 
+def _has_option_rows(q: Dict[str, Any], q_type: str) -> bool:
+    """
+    True when the row is written as options with Yes/No correctness: MCQs, and
+    option FTBs, which keep type FTB but are filled exactly like MCQ-SCA. A
+    legacy FTB keeps its answer-text / BlankN row.
+    """
+    return q_type in ("MCQ-SCA", "MCQ-MCA") or (
+        q_type == "FTB" and not is_legacy_ftb(BUCKET_FTB, q)
+    )
+
+
 def _slot_count_v2(q: Dict[str, Any], q_type: str) -> int:
     """How many Option/isOptionCorrect columns this question needs."""
-    if q_type in ("MCQ-SCA", "MCQ-MCA"):
+    if _has_option_rows(q, q_type):
         return len(q.get("options", []) or [])
     if q_type == "MTF":
         return len(q.get("pairs", []) or [])
@@ -95,7 +106,7 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
             row[f"isOption{i}Correct"] = ""
             
         # Logic per Type
-        if q_type in ["MCQ-SCA", "MCQ-MCA"]:
+        if _has_option_rows(q, q_type):
             options = q.get("options", [])
             correct_idx = q.get("correct_option_index")
             # correct_idx could be int (SCA) or list of ints (MCA) return 1-based index usually? 

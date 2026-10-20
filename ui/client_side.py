@@ -54,8 +54,19 @@ TYPE_KEY_BY_BUCKET = {
     BUCKET_TRUEFALSE: "truefalse",
 }
 
-# Buckets whose answer options are editable as options.
-OPTION_BUCKETS = (BUCKET_MCQ, BUCKET_MULTICHOICE)
+# Buckets whose answer options are editable as options. An FTB qualifies only
+# in the option shape — see `is_legacy_ftb`.
+OPTION_BUCKETS = (BUCKET_MCQ, BUCKET_MULTICHOICE, BUCKET_FTB)
+
+
+def is_legacy_ftb(bucket: str, question: Dict[str, Any]) -> bool:
+    """
+    An FTB stored before prompt version 6: a free-text `correct_answer` and no
+    `options`. It is edited through its text answer and can never gain options.
+    Every other FTB is answered like a single-select MCQ. Mirrors
+    `questions.is_legacy_ftb` on the server.
+    """
+    return bucket == BUCKET_FTB and not question.get("options")
 
 # Both the floor and the ceiling apply to every save — add and edit alike —
 # mirroring the server.
@@ -118,7 +129,9 @@ def editor_list(assessment_data: Optional[Dict[str, Any]]) -> List[Dict[str, Any
 
         options = question.get("options")
         option_count = len(options) if isinstance(options, list) else None
-        has_options = bucket in OPTION_BUCKETS and option_count is not None
+        legacy_ftb = is_legacy_ftb(bucket, question)
+        has_options = bucket in OPTION_BUCKETS and not legacy_ftb and option_count is not None
+        item["legacy_ftb"] = legacy_ftb
         item["option_count"] = option_count
         # Add turns off at the ceiling, remove at the floor.
         item["can_add_option"] = bool(has_options and option_count < MAX_OPTION_COUNT)
@@ -386,6 +399,14 @@ def error_text(error: Dict[str, Any]) -> str:
         return f"Option {p.get('option_position')} requires an integer index."
     if code == "option_index_duplicate":
         return "Option indexes must be unique."
+    if code == "options_required":
+        return "This question requires a list of answer options."
+    if code == "ftb_blank_count_invalid":
+        return (f"A fill-in-the-blank question must contain exactly "
+                f"{p.get('expected')} blank (___) (found {p.get('found')}).")
+    if code == "ftb_format_change_not_allowed":
+        return ("A fill-in-the-blank question cannot switch between the text-answer "
+                "and the options format.")
     if code == "correct_option_index_required":
         return ("A multiple-select question requires at least one correct option."
                 if p.get("expects") == "index_array"

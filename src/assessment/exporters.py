@@ -10,7 +10,7 @@ from docx.shared import Pt, Inches
 from weasyprint import HTML, CSS
 from weasyprint.text.fonts import FontConfiguration
 
-from .questions import iter_questions_in_order
+from .questions import answers_by_single_option, iter_questions_in_order
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,8 @@ def generate_html_content(assessment_data: dict) -> str:
         # Options / Body
         ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-        if q_type == "Multiple Choice Question":
+        # MCQ and option FTB render alike; a legacy FTB falls through to `Answer:`.
+        if answers_by_single_option(q_type, q):
             options = q.get("options", [])
             opts_html = "".join([f"<li>{ALPHA[i]}. {o.get('text', '')}</li>" for i, o in enumerate(options)])
             correct_idx = q.get('correct_option_index')
@@ -246,7 +247,8 @@ def generate_docx(assessment_data: dict, output_path: Path):
 
         ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-        if q_type == "Multiple Choice Question":
+        # MCQ and option FTB render alike; a legacy FTB falls through to `Answer:`.
+        if answers_by_single_option(q_type, q):
             options = q.get("options", [])
             for i, opt in enumerate(options):
                 doc.add_paragraph(f"{ALPHA[i]}. {opt.get('text', '')}", style='List Bullet')

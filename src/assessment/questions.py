@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import copy
 import random
+import re
 import uuid
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -108,7 +109,41 @@ MIN_OPTION_COUNT = 2
 MAX_OPTION_COUNT: Dict[str, Optional[int]] = {
     BUCKET_MCQ: 5,
     BUCKET_MULTICHOICE: 5,
+    BUCKET_FTB: 5,
 }
+
+
+# --------------------------------------------------------------------------
+# FTB formats
+# --------------------------------------------------------------------------
+# An FTB comes in one of two shapes, told apart per question:
+#   * option FTB — `options` + `correct_option_index`, answered like a
+#     single-answer MCQ. Every FTB generated or added from prompt version 6
+#     onward has this shape.
+#   * legacy FTB — `question_text` + a free-text `correct_answer`, no
+#     `options`. Only FTBs stored before version 6 have it. They stay in this
+#     shape for good: they remain editable as before, but can neither gain
+#     options nor be created anew.
+
+# A blank in an FTB `question_text` — two or more underscores.
+FTB_BLANK_PATTERN = re.compile(r"_{2,}")
+
+
+def is_legacy_ftb(bucket: str, question: Dict[str, Any]) -> bool:
+    """
+    True for an FTB in the pre-version-6 free-text shape. A null or empty
+    `options` counts as absent, so a client echoing a legacy FTB back with
+    `options: null` does not change its shape.
+    """
+    return bucket == BUCKET_FTB and not question.get("options")
+
+
+def answers_by_single_option(bucket: str, question: Dict[str, Any]) -> bool:
+    """
+    True for a question answered by one `correct_option_index`: every MCQ, and
+    every option FTB.
+    """
+    return bucket == BUCKET_MCQ or (bucket == BUCKET_FTB and not is_legacy_ftb(bucket, question))
 
 def resolve_bucket(name: str) -> Optional[str]:
     """Accept a bucket name, a short type key, or a question_type const."""
@@ -134,7 +169,7 @@ def new_question_id() -> str:
 # Normalization
 # --------------------------------------------------------------------------
 
-# The one convention for MCQ / Multi-Choice option indexes: the first option is
+# The one convention for MCQ / Multi-Choice / option-FTB indexes: the first option is
 # `index` 0. Stated to the model in resources/prompts.yaml (OPTION INDEXING) and
 # in the `description` of both fields in resources/schemas.json, assumed by the
 # editing UI, and enforced on fresh LLM output by `_rebase_option_indexes`.
@@ -299,10 +334,10 @@ def balance_mcq_answer_positions(
     assessment_data: Dict[str, Any], rng: Optional[random.Random] = None,
 ) -> None:
     """
-    Reorder MCQ options in place so the correct answer's position is spread
-    evenly across the assessment: within each option count, every position is
-    correct either floor(N/n) or ceil(N/n) times. Which question gets which
-    position, and the order of the distractors, is random.
+    Reorder MCQ and option-FTB options in place so the correct answer's position
+    is spread evenly across the assessment: within each type and option count,
+    every position is correct either floor(N/n) or ceil(N/n) times. Which
+    question gets which position, and the order of the distractors, is random.
 
     Fresh LLM output only — called once by worker_service.py before the first
     save. Never apply to a stored assessment: reordering options under a client
@@ -310,23 +345,25 @@ def balance_mcq_answer_positions(
     selects. Multi-Choice and the other types are untouched.
     """
     rng = rng or _ANSWER_POSITION_RNG
-    mcqs = (assessment_data.get("questions") or {}).get(BUCKET_MCQ)
-    if not isinstance(mcqs, list):
-        return
+    buckets = assessment_data.get("questions") or {}
+    for bucket in (BUCKET_MCQ, BUCKET_FTB):
+        questions = buckets.get(bucket)
+        if not isinstance(questions, list):
+            continue
 
-    by_option_count: Dict[int, List[Dict[str, Any]]] = {}
-    for question in mcqs:
-        if isinstance(question, dict):
-            count = _balanceable_option_count(question)
-            if count:
-                by_option_count.setdefault(count, []).append(question)
+        by_option_count: Dict[int, List[Dict[str, Any]]] = {}
+        for question in questions:
+            if isinstance(question, dict) and answers_by_single_option(bucket, question):
+                count = _balanceable_option_count(question)
+                if count:
+                    by_option_count.setdefault(count, []).append(question)
 
-    for count, group in by_option_count.items():
-        full_cycles, remainder = divmod(len(group), count)
-        targets = list(range(count)) * full_cycles + rng.sample(range(count), remainder)
-        rng.shuffle(targets)
-        for question, target in zip(group, targets):
-            _move_correct_option(question, target, rng)
+        for count, group in by_option_count.items():
+            full_cycles, remainder = divmod(len(group), count)
+            targets = list(range(count)) * full_cycles + rng.sample(range(count), remainder)
+            rng.shuffle(targets)
+            for question, target in zip(group, targets):
+                _move_correct_option(question, target, rng)
 
 
 # Spellings accepted for a True/False answer, mapped to the canonical form.
@@ -372,6 +409,7 @@ def normalize_assessment(
       * every question has a valid `provenance`
       * every question has the `question_type` const for its bucket
       * every True/False `correct_answer` is spelled "True" or "False"
+      * no option FTB carries a `correct_answer` (legacy FTBs are untouched)
       * `question_order` lists exactly the ids present, with no duplicates
 
     Legacy rows (no `question_id`, no `question_order`) are backfilled following
@@ -379,8 +417,8 @@ def normalize_assessment(
     exporters used previously — so existing downloads keep the numbering
     they have always had.
 
-    `rebase_option_indexes` additionally moves a one-based MCQ / Multi-Choice
-    question onto the zero-based convention. It defaults to **off** and is passed
+    `rebase_option_indexes` additionally moves a one-based MCQ / Multi-Choice /
+    option-FTB question onto the zero-based convention. It defaults to **off** and is passed
     only by worker_service.py, on fresh LLM output before the first store.
 
     It is deliberately not applied to stored assessments. The rebase itself is
@@ -444,6 +482,11 @@ def normalize_assessment(
 
             if bucket == BUCKET_TRUEFALSE:
                 _normalize_true_false(question)
+
+            # An option FTB is answered by `correct_option_index` alone; a
+            # `correct_answer` beside it would be a second, unenforced answer key.
+            if bucket == BUCKET_FTB and not is_legacy_ftb(bucket, question):
+                question.pop("correct_answer", None)
 
     # Pass 2 — repair `question_order`: keep the recorded sequence for ids that
     # still exist, drop stale ids, append anything new.

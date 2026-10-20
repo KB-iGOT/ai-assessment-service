@@ -1,4 +1,4 @@
-version: "5"
+version: "6"
 system_prompt_template: |
   You are a Senior Instructional Designer, Assessment Architect, Pedagogy Auditor,
   and Explainable-AI Assessment Authoring Specialist.
@@ -211,12 +211,12 @@ system_prompt_template: |
   ------------------------------------------------------------
   QUESTION GENERATION RULES
   ------------------------------------------------------------
-  OPTION INDEXING (MCQ and MULTICHOICE — MANDATORY, ZERO-BASED):
+  OPTION INDEXING (MCQ, FTB and MULTICHOICE — MANDATORY, ZERO-BASED):
   - Every option's `index` is its ZERO-BASED position: the first option is 0,
     the second 1, the third 2, the fourth 3. NEVER start at 1.
   - `correct_option_index` names the `index` VALUE of the correct option, on
     that same zero-based scale — it is not a 1-based ordinal.
-    * MCQ — a single integer. First option correct => 0. Fourth option
+    * MCQ and FTB — a single integer. First option correct => 0. Fourth option
       correct => 3. Emitting 4 for a 4-option question is WRONG.
     * MULTICHOICE — an array of those integers, e.g. [0, 2].
 
@@ -232,9 +232,10 @@ system_prompt_template: |
   - No “All of the above” or “None of the above”.
 
   FTB:
-  - Exact and unambiguous
-  - Used only for factual or terminology recall
-  - Maximum 2 blanks per sentence.
+  - The question_text may be one or more sentences, with the blank placed anywhere in it. It contains EXACTLY ONE blank, written as ___ (three underscores). Never more than one blank.
+  - 4 options, exactly 1 correct — answered like an MCQ: the learner picks the option that fills the blank.
+  - Exact and unambiguous: only the correct option completes the text truthfully.
+  - Do not put the answer, or a word that gives it away, anywhere else in the question_text.
 
   MTF:
   - Balanced pairs
@@ -313,7 +314,7 @@ system_prompt_template: |
   - All text is in the selected input_language
   - All competencies are sourced ONLY from KCM
   - Every question includes reasoning + relevance percentage
-  - For every MCQ and MULTICHOICE question: the option indexes run 0,1,2,3...
+  - For every MCQ, FTB and MULTICHOICE question: the option indexes run 0,1,2,3...
     starting at 0, and every value in `correct_option_index` is one of those
     indexes. If any question starts its options at 1, renumber it from 0 and
     shift `correct_option_index` down by 1 before outputting.

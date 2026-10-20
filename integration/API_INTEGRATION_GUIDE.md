@@ -161,7 +161,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
 | Type | Key | Description |
 |---|---|---|
 | Multiple Choice (Single) | `mcq` | One correct answer from 4 options |
-| Fill in the Blank | `ftb` | Complete a missing word or phrase |
+| Fill in the Blank | `ftb` | A sentence with one blank (`___`); pick the option that fills it, from 4 options (see [FTB formats](#ftb-formats)) |
 | Match the Following | `mtf` | Match items in two columns |
 | Multiple Choice (Multi) | `multichoice` | More than one correct answer from options |
 | True / False | `truefalse` | Binary true or false question |
@@ -326,14 +326,40 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 | `provenance` | `ai_generated` (untouched AI output), `ai_assisted` (AI output a reviewer has edited), `human_authored` (added manually). Server-controlled; ignored if sent by a client. |
 | `course_name` | The course this question is derived from. `"User Uploaded Content"` for standalone assessments. |
 | `question_text` | The question text (MTF uses `matching_context` instead) |
-| `options` | List of `{ "text": "...", "index": 0 }` answer choices. MCQ and Multi-Choice must have **at least 2** and **at most 5**. `index` is **zero-based** — the first option is `0`. |
-| `correct_option_index` | For MCQ, the single `index` of the correct option. For Multi-Choice, an array of correct `index` values. **Zero-based**, and matched against each option's own `index` field, not its array position. |
-| `correct_answer` | FTB: the answer text. True/False: `"True"` or `"False"`. |
+| `options` | List of `{ "text": "...", "index": 0 }` answer choices. MCQ, FTB and Multi-Choice must have **at least 2** and **at most 5**. `index` is **zero-based** — the first option is `0`. Absent on a legacy FTB. |
+| `correct_option_index` | For MCQ and FTB, the single `index` of the correct option. For Multi-Choice, an array of correct `index` values. **Zero-based**, and matched against each option's own `index` field, not its array position. |
+| `correct_answer` | True/False: `"True"` or `"False"`. Legacy FTB only: the answer text. |
 | `pairs` | MTF: list of `{ "left": "...", "right": "..." }`, at least 2. |
 | `blooms_level` | `Remember`, `Understand`, `Apply`, `Analyze`, `Evaluate`, or `Create` |
 | `answer_rationale` | `correct_answer_explanation`, `why_factor`, `logic_justification` |
 | `reasoning` | `learning_objective_alignment`, `competency_alignment` (KCM area/theme/sub-theme), `blooms_level_justification`, `difficulty_justification`, `question_type_rationale`, `assessment_type_relevance` |
 | `relevance_percentage` | 0–100 confidence score based on LO alignment (35%), competency fit (30%), Bloom's match (20%), assessment fit (15%) |
+
+### FTB formats
+
+From prompt version 6, a Fill-in-the-Blank question is answered like a single-select MCQ: the learner picks the option that fills the blank. FTBs stored before that keep their original free-text format. **The two formats coexist — even inside one assessment — so a client must check every FTB individually: if it has a non-empty `options` list it is an option FTB, otherwise it is a legacy FTB.**
+
+| | Option FTB | Legacy FTB |
+|---|---|---|
+| Which FTBs | Every FTB generated or added from prompt version 6 on | Only FTBs already stored before it |
+| `question_text` | Exactly one blank, written `___` | Unchanged (may hold up to 2 blanks) |
+| Answer fields | `options` (2–5) + `correct_option_index` (single integer) — exactly as MCQ | `correct_answer` (text) |
+| `correct_answer` | Never present | Present |
+| Editable answer fields | `options`, `correct_option_index` | `correct_answer` |
+| Can be created | Yes — the only format `POST /questions/create` accepts for `ftb` | No |
+| Can switch format | No | No |
+
+```json
+{
+  "question_type": "FTB",
+  "question_text": "Earth revolves around the ___.",
+  "options": [
+    { "text": "Moon", "index": 0 }, { "text": "Sun", "index": 1 },
+    { "text": "Mars", "index": 2 }, { "text": "Venus", "index": 3 }
+  ],
+  "correct_option_index": 1
+}
+```
 
 ---
 
@@ -452,6 +478,8 @@ becomes "Needs between 2 and 5 options — this one has 1" in your string table.
 | `correct_option_index_out_of_range` | `found`, `valid_indexes` |
 | `correct_option_index_invalid`, `correct_option_index_required` | `expects` (`single_index` \| `index_array`) |
 | `correct_answer_invalid` | `allowed` |
+| `ftb_blank_count_invalid` | `expected` (always `1`), `found` |
+| `ftb_format_change_not_allowed`, `options_required` | — |
 | `blooms_level_invalid` | `allowed`, `found` |
 | `relevance_invalid` | `minimum`, `maximum`, `found` |
 | `provenance_invalid` | `allowed`, `found` |
@@ -469,8 +497,9 @@ Validation covers the five limbs the specification names — question, answer, o
 | Limb | Rules |
 |---|---|
 | Question | Question text (or MTF matching context) cannot be empty. Answer rationale cannot be empty. `blooms_level` must be one of the six levels while Bloom's is enabled. `relevance_percentage` must be an integer 0–100. |
-| Option | MCQ and Multi-Choice must have **at least 2 options**, each with non-empty text and a unique integer `index`. They must also have **at most 5**, on both add and edit. MTF requires at least 2 complete pairs. |
-| Answer | The correct answer must reference an existing option `index`. MCQ takes one index, Multi-Choice at least one. True/False must be `"True"` or `"False"`. FTB requires answer text. A question can never be left unscorable. |
+| Option | MCQ, option FTB and Multi-Choice must have **at least 2 options**, each with non-empty text and a unique integer `index`. They must also have **at most 5**, on both add and edit. MTF requires at least 2 complete pairs. |
+| Answer | The correct answer must reference an existing option `index`. MCQ and option FTB take one index, Multi-Choice at least one. True/False must be `"True"` or `"False"`. A legacy FTB requires answer text. A question can never be left unscorable. |
+| FTB | An option FTB's text must contain exactly one `___` blank (`ftb_blank_count_invalid`). An added FTB must have options (`options_required`). An FTB can never switch between the legacy and option formats — sending `options` to a legacy FTB, or `correct_answer` to an option FTB, is `field_not_editable`, and a whole-assessment update that adds or strips an FTB's options is `ftb_format_change_not_allowed`. See [FTB formats](#ftb-formats). |
 | Mapping | A mapping field cannot be blanked once set. The competency triple is all-or-nothing — area, theme and sub-theme together. The triple's values are free text and are not checked against the KCM dataset. |
 | Assessment | At least one question must remain. Question identifiers must be unique. |
 
@@ -510,9 +539,15 @@ const BUCKET_KEY = {
   "Multiple Choice Question": "mcq", "FTB Question": "ftb", "MTF Question": "mtf",
   "Multi-Choice Question": "multichoice", "True/False Question": "truefalse",
 };
-const OPTION_BUCKETS = ["Multiple Choice Question", "Multi-Choice Question"];
+// An FTB has editable options only in the option format — see FTB formats.
+const OPTION_BUCKETS = ["Multiple Choice Question", "Multi-Choice Question", "FTB Question"];
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 5;
+
+// A legacy FTB: stored before prompt version 6, free-text `correct_answer`,
+// no options. Edited through its text answer; it can never gain options.
+const isLegacyFtb = (bucket, q) =>
+  bucket === "FTB Question" && !(Array.isArray(q.options) && q.options.length);
 
 function editorList(assessmentData) {
   const { question_order: order, questions } = assessmentData;
@@ -525,12 +560,14 @@ function editorList(assessmentData) {
   return (order ?? []).map((id, i) => {
     const { bucket, q } = byId.get(id);
     const optionCount = Array.isArray(q.options) ? q.options.length : null;
-    const hasOptions = OPTION_BUCKETS.includes(bucket) && optionCount !== null;
+    const legacyFtb = isLegacyFtb(bucket, q);
+    const hasOptions = OPTION_BUCKETS.includes(bucket) && !legacyFtb && optionCount !== null;
     return {
       ...q,
       position: i + 1,
       question_bucket: bucket,
       question_type_key: BUCKET_KEY[bucket] ?? bucket,
+      legacy_ftb: legacyFtb,
       option_count: optionCount,
       // The 5-option ceiling applies to both add and edit, so add turns off
       // at the ceiling and remove at the floor.
@@ -606,9 +643,9 @@ curl --location \
 |---|---|
 | `question_text` | All except MTF |
 | `matching_context` | MTF only |
-| `options` | MCQ, Multi-Choice — full replacement list, 2 to 5 items of `{text, index}` |
-| `correct_option_index` | MCQ (integer), Multi-Choice (array of integers) |
-| `correct_answer` | FTB (text), True/False (`"True"` / `"False"`) |
+| `options` | MCQ, option FTB, Multi-Choice — full replacement list, 2 to 5 items of `{text, index}` |
+| `correct_option_index` | MCQ and option FTB (integer), Multi-Choice (array of integers) |
+| `correct_answer` | Legacy FTB (text), True/False (`"True"` / `"False"`) |
 | `pairs` | MTF — full replacement list of `{left, right}` |
 | `answer_rationale.correct_answer_explanation` · `.why_factor` · `.logic_justification` | All |
 | `blooms_level` | All |
@@ -698,7 +735,7 @@ curl --location \
 | Field | Required | Description |
 |---|---|---|
 | `questionType` | Yes | `mcq`, `ftb`, `mtf`, `multichoice`, `truefalse` |
-| `question` | Yes | The authored question. Accepts the same fields as the editable-path table above (nested, not dotted). |
+| `question` | Yes | The authored question. Accepts the same fields as the editable-path table above (nested, not dotted). An `ftb` is always added in the option format — `question_text` with one `___`, `options` and `correct_option_index`; sending `correct_answer` returns `field_not_editable`, and omitting `options` returns `options_required`. |
 | `position` | No | 1-based position in the sequence. Omit to append at the end. |
 | `version` | No (recommended) | Version this add is based on. |
 

@@ -1067,9 +1067,14 @@ async def update_assessment_v1(
     except _Conflict as conflict:
         return _conflict_response(job_id, conflict.current_version)
 
-    normalized, events = diff_assessments(
-        row.get("assessment_data") or {}, payload.assessment_data, editor_id=user_id
-    )
+    try:
+        normalized, events = diff_assessments(
+            row.get("assessment_data") or {}, payload.assessment_data, editor_id=user_id
+        )
+    except ValidationError as exc:
+        logger.info(f"[{job_id}] Whole-blob update blocked by validation | "
+                    f"errors={[e['code'] for e in exc.errors][:10]}")
+        return _validation_response(exc.errors)
 
     # Validate the questions this save adds or changes. Untouched questions are
     # left alone so a pre-existing gap elsewhere in an older assessment cannot
