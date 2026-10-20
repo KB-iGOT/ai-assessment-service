@@ -7,6 +7,7 @@ import time
 import random
 import yaml
 import fitz  # PyMuPDF
+import docx  # python-docx
 import re
 from collections import Counter
 from pathlib import Path
@@ -431,6 +432,7 @@ async def generate_assessment(
     course_weightage: Optional[str] = None,
     time_limit: Optional[int] = None,
     extra_files: Optional[List[Path]] = None,
+    transcript_files: Optional[List[Path]] = None,
     competency_area: Optional[str] = None,
     competency_themes: Optional[str] = None,
     competency_sub_themes: Optional[str] = None,
@@ -572,27 +574,34 @@ async def generate_assessment(
             aggregated_metadata["courses"].append({
                 "name": "User Uploaded Content",
                 "code": "CUSTOM_UPLOAD",
-                "description": "Assessment generated from user provided files (PDF/VTT)."
+                "description": "Assessment generated from user provided files (transcripts/documents)."
             })
 
-    # Process Extra Uploaded Files (from API)
-    if extra_files:
-        uploaded_vtt = False
-        uploaded_pdf = False
-        for fpath in extra_files:
-            if fpath.suffix.lower() == '.pdf':
-                text = await extract_pdf_text(fpath)
-                if text:
-                    combined_pdfs.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
-                    uploaded_pdf = True
-            elif fpath.suffix.lower() == '.vtt':
-                text = await extract_vtt_text(fpath)
-                if text:
-                    combined_transcript.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
-                    uploaded_vtt = True
+    # Process Uploaded Files (from API). The field decides the prompt section,
+    # the extension only decides how text is extracted: `transcript_files` go
+    # to TRANSCRIPTS, `extra_files` (supporting documents) to document content.
+    if extra_files or transcript_files:
+        uploaded_transcript = False
+        uploaded_docs = False
+        uploads = [(p, True) for p in (transcript_files or [])] + [
+            (p, False) for p in (extra_files or [])
+        ]
+        for fpath, is_transcript in uploads:
+            text = await extract_uploaded_text(fpath)
+            if not text:
+                logger.warning(f"No text extracted from uploaded file {fpath.name} — it will not contribute to the prompt")
+                continue
+            if is_transcript:
+                combined_transcript.append(f"--- UPLOADED TRANSCRIPT: {fpath.name} ---\n{text}")
+                uploaded_transcript = True
+            else:
+                combined_pdfs.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
+                uploaded_docs = True
+        # Key names kept for API compatibility: has_vtt = transcript content,
+        # has_pdf = supporting-document content (any accepted format).
         aggregated_metadata["content_availability"]["uploaded_files"] = {
-            "has_vtt": uploaded_vtt,
-            "has_pdf": uploaded_pdf,
+            "has_vtt": uploaded_transcript,
+            "has_pdf": uploaded_docs,
         }
 
     final_transcript_str = "\n\n".join(combined_transcript) if combined_transcript else "N/A"
@@ -1565,3 +1574,49 @@ def extract_pdf_text_sync(pdf_path: Path) -> str:
 
 async def extract_pdf_text(pdf_path: Path) -> str:
     return await asyncio.get_running_loop().run_in_executor(None, extract_pdf_text_sync, pdf_path)
+
+async def extract_txt_text(txt_path: Path) -> str:
+    def _read():
+        try:
+            raw = txt_path.read_text(encoding='utf-8-sig')
+        except Exception:
+            raw = txt_path.read_text(encoding='latin-1')
+        # NULs: see extract_vtt_text.
+        return raw.replace('\x00', '').strip()
+
+    return await asyncio.to_thread(_read)
+
+def extract_docx_text_sync(docx_path: Path) -> str:
+    text_parts = []
+    try:
+        doc = docx.Document(str(docx_path))
+        for para in doc.paragraphs:
+            if para.text.strip():
+                text_parts.append(para.text.strip())
+        # Tables are not part of doc.paragraphs; one line per row.
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    text_parts.append(" | ".join(cells))
+    except Exception as e:
+        logger.exception('DOCX extraction failed for %s: %s', docx_path, e)
+    return '\n'.join(text_parts).replace('\x00', '')
+
+async def extract_docx_text(docx_path: Path) -> str:
+    return await asyncio.get_running_loop().run_in_executor(None, extract_docx_text_sync, docx_path)
+
+_UPLOAD_EXTRACTORS = {
+    '.pdf': extract_pdf_text,
+    '.vtt': extract_vtt_text,
+    '.txt': extract_txt_text,
+    '.docx': extract_docx_text,
+}
+
+async def extract_uploaded_text(path: Path) -> str:
+    """Extract text from an uploaded file by extension; '' if the type is unsupported."""
+    extractor = _UPLOAD_EXTRACTORS.get(path.suffix.lower())
+    if extractor is None:
+        logger.warning(f"Unsupported upload type skipped: {path.name}")
+        return ""
+    return await extractor(path)

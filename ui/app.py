@@ -136,7 +136,8 @@ with tab_gen:
         else:
             comp_area = comp_themes = comp_sub_themes = None
 
-        uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
+        uploaded_transcripts = st.file_uploader("Transcripts (VTT/TXT/PDF/DOCX)", type=["vtt", "txt", "pdf", "docx"], accept_multiple_files=True)
+        uploaded_files = st.file_uploader("Supporting Documents (PDF/DOCX)", type=["pdf", "docx"], accept_multiple_files=True)
 
     if st.button("Start Generation", type="primary"):
         if not auth_token:
@@ -178,11 +179,17 @@ with tab_gen:
         if comp_sub_themes:
             payload['competency_sub_themes'] = [s.strip() for s in comp_sub_themes.split(",") if s.strip()]
 
+        upload_mimes = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".vtt": "text/vtt",
+            ".txt": "text/plain",
+        }
         files = []
-        if uploaded_files:
-            for f in uploaded_files:
-                mime = "application/pdf" if f.name.endswith(".pdf") else "text/vtt"
-                files.append(('files', (f.name, f.getvalue(), mime)))
+        for field, uploads in (("transcript_files", uploaded_transcripts), ("files", uploaded_files)):
+            for f in uploads or []:
+                mime = upload_mimes.get(os.path.splitext(f.name)[1].lower(), "application/octet-stream")
+                files.append((field, (f.name, f.getvalue(), mime)))
 
         with st.spinner("Calling API..."):
             try:

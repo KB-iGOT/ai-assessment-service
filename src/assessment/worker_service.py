@@ -51,19 +51,27 @@ async def process_job(payload: Dict[str, Any]):
 
         # 2. Setup Paths
         base_path = Path(INTERACTIVE_COURSES_PATH)
-        extra_files_str = payload.get('extra_files', [])
         stored_paths_to_cleanup = []
-        extra_files = []
-        if extra_files_str:
-            storage = get_storage_service()
-            for stored_path in extra_files_str:
-                local_dest = Path(INTERACTIVE_COURSES_PATH) / "storage_downloads" / job_id / Path(stored_path).name
-                storage.read_file(stored_path, local_dest)
-                extra_files.append(local_dest)
-                stored_paths_to_cleanup.append(stored_path)
-                logger.info(f"[{job_id}] File retrieved from storage: {stored_path} → {local_dest}")
+
+        def _retrieve(stored_paths):
+            local_paths = []
+            if stored_paths:
+                storage = get_storage_service()
+                for stored_path in stored_paths:
+                    local_dest = Path(INTERACTIVE_COURSES_PATH) / "storage_downloads" / job_id / Path(stored_path).name
+                    storage.read_file(stored_path, local_dest)
+                    local_paths.append(local_dest)
+                    stored_paths_to_cleanup.append(stored_path)
+                    logger.info(f"[{job_id}] File retrieved from storage: {stored_path} → {local_dest}")
+            return local_paths
+
+        extra_files = _retrieve(payload.get('extra_files', []))
+        # Absent on payloads queued before transcript uploads were split out.
+        transcript_files = _retrieve(payload.get('transcript_files', []))
         if extra_files:
             logger.info(f"[{job_id}] Extra files ready: {[str(p) for p in extra_files]}")
+        if transcript_files:
+            logger.info(f"[{job_id}] Transcript files ready: {[str(p) for p in transcript_files]}")
 
         # 3. Fetch Course Content
         for cid in course_ids:
@@ -112,6 +120,7 @@ async def process_job(payload: Dict[str, Any]):
                 course_weightage=payload.get('course_weightage'),
                 time_limit=payload.get('time_limit'),
                 extra_files=extra_files,
+                transcript_files=transcript_files,
                 competency_area=payload.get('competency_area'),
                 competency_themes=payload.get('competency_themes'),
                 competency_sub_themes=payload.get('competency_sub_themes'),

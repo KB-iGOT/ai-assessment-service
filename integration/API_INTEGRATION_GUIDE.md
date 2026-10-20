@@ -153,7 +153,10 @@ curl --location 'https://portal.uat.karmayogibharat.net/api/ai/assessments/v1/ge
 | `competency_themes` | string (repeated) | Yes* | One value per field | `*`Required when `assessment_type=competency`. Pass as repeated form fields. e.g. `--form 'competency_themes="Service Orientation"' --form 'competency_themes="Decision Making"'` |
 | `competency_sub_themes` | string (repeated) | Yes* | One value per field | `*`Required when `assessment_type=competency`. Pass as repeated form fields. e.g. `--form 'competency_sub_themes="Citizen Centricity"' --form 'competency_sub_themes="Empathy"'` |
 | `additional_instructions` | string | No | Free text | Any extra instructions passed to the AI model (e.g. "focus on case studies", "avoid numerical questions"). |
-| `files` | file (repeated, multipart) | Yes* | One or more uploaded files | `*`Required for `assessment_type=standalone` unless `course_ids` is provided instead — `standalone` needs at least one of the two. Pass as repeated multipart file fields. |
+| `files` | file (repeated, multipart) | Yes* | `.pdf`, `.docx` | Supporting documents. Every file here is treated as document content. `*`For `assessment_type=standalone`, at least one of `course_ids`, `files` or `transcript_files` is required. Pass as repeated multipart file fields. Send transcripts in `transcript_files`, not here. |
+| `transcript_files` | file (repeated, multipart) | No | `.vtt`, `.txt`, `.pdf`, `.docx` | Transcripts. Every file here is treated as transcript content, whatever its format. Pass as repeated multipart file fields. |
+
+Uploads with any other extension are accepted but ignored: the job still runs, without that file's content.
 | `force` | boolean | No | `true`, `false` | `true` bypasses cache and forces a fresh generation. Default: `false`. |
 
 #### Question Types
@@ -313,7 +316,7 @@ curl --location 'https://portal.uat.karmayogibharat.net/apis/proxies/v8/ai/asses
 | `status` | `PENDING`, `IN_PROGRESS`, `COMPLETED`, or `FAILED` |
 | `version` | Assessment version. Starts at `1` on generation and increments on every saved edit. Pass it back on any editing call to detect concurrent updates. |
 | `metadata.config` | All generation parameters used for this job — `assessment_type`, `difficulty`, `language`, `total_questions`, `question_type_counts`, `enable_blooms`, `blooms_config`, `topic_names`, `additional_instructions`, `time_limit`, `course_weightage`, `competency_area`, `competency_themes`, `competency_sub_themes` |
-| `metadata.content_availability` | Per-course VTT and PDF availability. For course-based jobs: `{ "<course_id>": { "has_vtt": true, "has_pdf": false } }`. For standalone uploads: `{ "uploaded_files": { "has_vtt": true, "has_pdf": true } }`. `has_vtt: false` when the VTT file exists but contains no subtitle content. |
+| `metadata.content_availability` | Per-course VTT and PDF availability. For course-based jobs: `{ "<course_id>": { "has_vtt": true, "has_pdf": false } }`. For uploads: `{ "uploaded_files": { "has_vtt": true, "has_pdf": true } }`, where `has_vtt` means transcript content was extracted (any transcript format) and `has_pdf` means supporting-document content was extracted (PDF or DOCX). `has_vtt: false` when the VTT file exists but contains no subtitle content. |
 | `assessment_data` | `null` until complete. On completion contains `blueprint`, `question_order` and `questions` keyed by type. |
 | `assessment_data.question_order` | **The authoritative question sequence** — an array of `question_id` in presentation order. The type buckets under `questions` store the content; this array decides the order. Every download honours it. |
 | `error_message` | `null` on success. Contains error details if `status` is `FAILED`. |
