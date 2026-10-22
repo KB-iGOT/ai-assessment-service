@@ -22,6 +22,7 @@ from .config import (
     GOOGLE_PROJECT_ID, GOOGLE_LOCATION, GENAI_MODEL_NAME,
     GOOGLE_APPLICATION_CREDENTIALS, PROMPT_VERSION, INTERACTIVE_COURSES_PATH,
     QUESTION_BATCH_SIZE, BATCH_MAX_ATTEMPTS, ENABLE_QUESTION_BATCHING, TOPUP_MAX_ROUNDS,
+    CASE_STUDY_MIN_LEVEL_PCT,
 )
 from .batching import Batch, apportion, merge_batches, plan_batches, summarize_for_dedup
 from .questions import new_question_id
@@ -258,8 +259,8 @@ def format_previously_generated(digest: List[Dict[str, str]]) -> str:
         "  - Same concept at a different Bloom's level = duplicate.\n"
         "  - A genuinely broader or narrower knowledge domain at a different Bloom's\n"
         "    level = permitted.\n\n"
-        "  - This does NOT change your counts. Produce exactly the counts in section 9\n"
-        "    AND exactly the per-course quantities in section 13.\n"
+        "  - This does NOT change your counts. Produce exactly the counts in section 10\n"
+        "    AND exactly the per-course quantities in section 14.\n"
         "  - The course tag on each line above is there so you can avoid repeating a\n"
         "    concept — NOT as a signal that a course is 'done'. A course appearing\n"
         "    often above still receives its full quantity in this part. If avoiding a\n"
@@ -326,7 +327,7 @@ def build_course_distribution_instruction(
     Still says nothing about which specific question types come from which course
     — the cross product is left to the model. What it no longer leaves implicit is
     that the quota has to be spread across the types rather than parked in one of
-    them; that rule lives in section 13 of the template, which observed runs
+    them; that rule lives in section 14 of the template, which observed runs
     showed was being treated as advisory next to the per-type counts.
     """
     if course_counts:
@@ -414,6 +415,49 @@ def compute_blooms_by_type(
         result[t].append(level)
 
     return result
+
+
+# Bloom's percentages used when Bloom's is enabled but no distribution was
+# supplied (PRD defaults by difficulty level).
+DEFAULT_BLOOMS_BY_DIFFICULTY: Dict[str, Dict[str, int]] = {
+    "beginner": {"Remember": 40, "Understand": 40, "Apply": 20},
+    "intermediate": {"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 20},
+    "advanced": {"Apply": 20, "Analyze": 40, "Evaluate": 30, "Create": 10},
+}
+DEFAULT_BLOOMS_FALLBACK: Dict[str, int] = {
+    "Remember": 20, "Understand": 25, "Apply": 25, "Analyze": 20, "Evaluate": 10,
+}
+
+CASE_STUDY_BLOOMS = ["Apply", "Analyze", "Evaluate", "Create"]
+
+
+def case_study_levels(
+    level_weights: Dict[str, float],
+    difficulty_level: Optional[str],
+) -> List[str]:
+    """
+    The higher-order Bloom's levels the prompt offers as eligible for case studies.
+
+    `level_weights` must describe the WHOLE assessment — question counts from
+    `compute_blooms_by_type`, or the default percentages — never one batch's
+    slice. Slices are shuffled runs of the assignment, so a level at 5% overall
+    can look like 25% inside a small batch; deciding once, here, gives every
+    batch and top-up call the same answer.
+
+    A level qualifies at CASE_STUDY_MIN_LEVEL_PCT or more of the total. Beginner
+    gets none: its difficulty rule limits any scenario to 2-3 sentences. This
+    only decides which levels MAY carry a case study — whether any question does
+    is left to the model.
+    """
+    if (difficulty_level or "").lower() == "beginner":
+        return []
+    total = sum(level_weights.values())
+    if total <= 0:
+        return []
+    return [
+        level for level in CASE_STUDY_BLOOMS
+        if level_weights.get(level, 0) * 100 / total >= CASE_STUDY_MIN_LEVEL_PCT
+    ]
 
 
 async def generate_assessment(
@@ -619,26 +663,28 @@ async def generate_assessment(
     #    `blooms_by_type` is kept alongside the formatted string: the batched path
     #    slices it per batch, and it stays empty on the two branches that have no
     #    per-type assignment to slice (disabled, and percentage defaults).
+    #    `blooms_weights` is the whole assessment's mix, for `case_study_levels`.
     blooms_by_type: Dict[str, List[str]] = {}
+    blooms_weights: Dict[str, float] = {}
     if not enable_blooms:
         blooms_str = "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
     elif not blooms_distribution:
         # Dynamic defaults based on Difficulty Level (PRD Requirement)
-        if difficulty_level.lower() == "beginner":
-            blooms_str = "Remember: 40%, Understand: 40%, Apply: 20%"
-        elif difficulty_level.lower() == "intermediate":
-            blooms_str = "Remember: 20%, Understand: 30%, Apply: 30%, Analyze: 20%"
-        elif difficulty_level.lower() == "advanced":
-             blooms_str = "Apply: 20%, Analyze: 40%, Evaluate: 30%, Create: 10%"
-        else:
-            blooms_str = "Remember: 20%, Understand: 25%, Apply: 25%, Analyze: 20%, Evaluate: 10%"
+        blooms_weights = DEFAULT_BLOOMS_BY_DIFFICULTY.get(
+            (difficulty_level or "").lower(), DEFAULT_BLOOMS_FALLBACK,
+        )
+        blooms_str = ", ".join(f"{level}: {pct}%" for level, pct in blooms_weights.items())
     else:
         # Distribute bloom levels per question type so the LLM gets unambiguous assignments.
         # A flat numbered list is unreliable because the LLM writes questions grouped by type,
         # not as a flat sequence — it cannot map "Question N" to the right type bucket.
         blooms_by_type = compute_blooms_by_type(blooms_distribution, question_type_counts or {})
         blooms_str = format_blooms_by_type(blooms_by_type)
+        blooms_weights = Counter(level for levels in blooms_by_type.values() for level in levels)
         logger.info(f"Blooms by type: { {k: v for k, v in blooms_by_type.items()} }")
+
+    eligible_case_study_levels = case_study_levels(blooms_weights, difficulty_level)
+    logger.info(f"Case study eligible levels: {eligible_case_study_levels or 'None'}")
 
     # 3. Format Topics
     topics_str = ", ".join(topic_names) if topic_names else "None specific (Cover all modules)"
@@ -677,6 +723,7 @@ async def generate_assessment(
         input_language=input_language,
         topic_names=topics_str,
         competency_focus_instruction=competency_focus_instruction,
+        case_study_levels=", ".join(eligible_case_study_levels) or "None",
     )
 
     if not use_batching:
@@ -886,7 +933,7 @@ def _batch_prompt_inputs(
     `shared_prompt_inputs` as rendered for a call that holds only PART of the
     assessment — every batch, and every top-up call on either path.
 
-    Section 10 asks the model to set question depth against the time available.
+    Section 11 asks the model to set question depth against the time available.
     The limit is the whole assessment's but a batch holds a slice, so left as-is
     a 25-question batch divides the whole budget by its own volume and reads a
     per-question allowance several times larger than the real one.
@@ -1146,7 +1193,7 @@ def _format_final_batch_total(
     The whole-assessment figures are written inline and NOT through
     `format_question_type_instructions`: rendering them as a second bulleted list
     in the same shape as the one directly above would put two sets of counts in
-    identical formatting inside section 9, which invites the model to generate
+    identical formatting inside section 10, which invites the model to generate
     against the wrong one.
     """
     breakdown = "; ".join(
@@ -1387,6 +1434,7 @@ def build_prompt(
     blooms_distribution: str,
     course_weightage_instruction: str,
     competency_focus_instruction: str = "Not applicable for this assessment type.",
+    case_study_levels: str = "None",
     *,
     total_questions_text: Optional[str] = None,
     blueprint_section: Optional[str] = None,
@@ -1460,7 +1508,8 @@ def build_prompt(
     # v3.2 Specifics
     prompt = prompt.replace("{topic_names}", topic_names)
     prompt = prompt.replace("{blooms_distribution}", blooms_distribution)
-    
+    prompt = prompt.replace("{case_study_levels}", case_study_levels)
+
     prompt = prompt.replace("{p_version}", PROMPT_VERSION)
     prompt = prompt.replace("{a_version}", "api/v1")
 

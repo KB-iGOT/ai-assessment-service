@@ -92,6 +92,13 @@ TOPUP_MAX_ROUNDS = int(os.getenv("TOPUP_MAX_ROUNDS", "1"))
 # whatever base it was generated on.
 NORMALIZE_OPTION_INDEX_BASE = os.getenv("NORMALIZE_OPTION_INDEX_BASE", "true").lower() == "true"
 
+# Case studies are suggested, never required. A higher-order Bloom's level
+# (Apply / Analyze / Evaluate / Create) is offered to the model as eligible for
+# case studies only when it makes up at least this percentage of the whole
+# assessment. Worked out once, before batching, so every batch is told the same
+# levels — a batch's own slice of the assignment is not the assessment's mix.
+CASE_STUDY_MIN_LEVEL_PCT = float(os.getenv("CASE_STUDY_MIN_LEVEL_PCT", "20"))
+
 # Langfuse Observability (opt-in — set LANGFUSE_ENABLED=true to activate)
 LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
