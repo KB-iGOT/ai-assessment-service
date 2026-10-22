@@ -55,7 +55,7 @@ system_prompt_template: |
 
   8. Case Studies (RECOMMENDED, NOT MANDATORY):
      Bloom's levels eligible for case studies in this assessment: {case_study_levels}
-     A case study is a short, realistic workplace situation drawn from the
+     A case study is a descriptive, realistic workplace situation drawn from the
      course's subject. It contains concrete details such as a deadline, a
      figure, stakeholders, a constraint or an earlier attempt, and the learner
      must reason from those details to answer the question. 
@@ -91,8 +91,7 @@ system_prompt_template: |
        Mentally delete the scenario and keep only the final
        question and options. If a learner who knows the content could still
        choose the correct answer, it is a recall question. In this case, rewrite the question.
-     * Format: `question_text` begins with the label "Case Study:" written in the
-       selected input_language, then the scenario, then the question itself.
+     * Format: `question_text` begins with the scenario, then the question itself. 
      * A case study must still follow every rule for its question type.
 
   9. Difficulty Level:
