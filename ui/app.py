@@ -23,6 +23,9 @@ load_dotenv()
 API_BASE = os.getenv("API_URL", "http://localhost:8000")
 API_V1 = f"{API_BASE}/ai-assessments/v1"
 
+PDF_MIME = "application/pdf"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
 st.set_page_config(page_title="Assessment Generator (Interactive)", layout="wide", page_icon="🧩")
 
 # --- Sidebar: Auth & Config ---
@@ -180,8 +183,8 @@ with tab_gen:
             payload['competency_sub_themes'] = [s.strip() for s in comp_sub_themes.split(",") if s.strip()]
 
         upload_mimes = {
-            ".pdf": "application/pdf",
-            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".pdf": PDF_MIME,
+            ".docx": DOCX_MIME,
             ".vtt": "text/vtt",
             ".txt": "text/plain",
         }
@@ -418,8 +421,8 @@ with tab_view:
                 ("csv",       d1, "Download CSV",       "text/csv"),
                 ("csv_basic", d2, "Download CSV Basic", "text/csv"),
                 ("json",      d3, "Download JSON",      "application/json"),
-                ("pdf",       d4, "Download PDF",       "application/pdf"),
-                ("docx",      d5, "Download DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                ("pdf",       d4, "Download PDF",       PDF_MIME),
+                ("docx",      d5, "Download DOCX",      DOCX_MIME),
             ]:
                 try:
                     dl_resp = requests.get(
@@ -791,7 +794,7 @@ with tab_view:
                                 if r_mv.status_code == 200:
                                     # Screen readers would consume this via aria-live.
                                     st.success(announce_reordered(
-                                        qid, pos, int(target), len(new_order)))
+                                        pos, int(target), len(new_order)))
                                     st.rerun()
                                 else:
                                     show_api_error(r_mv, "Reorder failed")
@@ -1315,8 +1318,8 @@ with tab_history:
                         for fmt, col, label, mime in [
                             ("csv",       dl_col1, "CSV",       "text/csv"),
                             ("csv_basic", dl_col2, "CSV Basic", "text/csv"),
-                            ("pdf",       dl_col3, "PDF",       "application/pdf"),
-                            ("docx",      dl_col4, "DOCX",      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                            ("pdf",       dl_col3, "PDF",       PDF_MIME),
+                            ("docx",      dl_col4, "DOCX",      DOCX_MIME),
                         ]:
                             try:
                                 dl_r = requests.get(

@@ -387,9 +387,12 @@ def error_text(error: Dict[str, Any]) -> str:
 
     if code == "option_count_invalid":
         low, high, found = p.get("minimum"), p.get("maximum"), p.get("found")
-        expected = (f"at least {low}" if high is None
-                    else f"exactly {high}" if high == low
-                    else f"between {low} and {high}")
+        if high is None:
+            expected = f"at least {low}"
+        elif high == low:
+            expected = f"exactly {high}"
+        else:
+            expected = f"between {low} and {high}"
         return f"This question type must have {expected} options (found {found})."
     if code == "option_text_required":
         return f"Option {p.get('option_position')} text cannot be empty."
@@ -560,8 +563,7 @@ def announce_deleted(position: Optional[int], remaining: int) -> str:
     return f"Question removed{where}. {remaining} question(s) remain."
 
 
-def announce_reordered(question_id: str, old_position: int, new_position: int,
-                       total: int) -> str:
+def announce_reordered(old_position: int, new_position: int, total: int) -> str:
     return (f"Question moved from position {old_position} to position "
             f"{new_position} of {total}.")
 

@@ -168,7 +168,7 @@ def trim_to_counts(
         over_level = _over_assignment(questions, (blooms_by_type or {}).get(type_key))
         ranked = sorted(
             range(len(questions)),
-            key=lambda i: (i in over_level, id(questions[i]) in over_course, i),
+            key=lambda i, ol=over_level, qs=questions: (i in ol, id(qs[i]) in over_course, i),
             reverse=True,
         )
         drop = set(ranked[:excess])
