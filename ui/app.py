@@ -136,7 +136,8 @@ with tab_gen:
         else:
             comp_area = comp_themes = comp_sub_themes = None
 
-        uploaded_files = st.file_uploader("Upload Context (PDF/VTT)", accept_multiple_files=True)
+        uploaded_transcripts = st.file_uploader("Transcripts (VTT/TXT/PDF/DOCX)", type=["vtt", "txt", "pdf", "docx"], accept_multiple_files=True)
+        uploaded_files = st.file_uploader("Supporting Documents (PDF/DOCX)", type=["pdf", "docx"], accept_multiple_files=True)
 
     if st.button("Start Generation", type="primary"):
         if not auth_token:
@@ -178,11 +179,17 @@ with tab_gen:
         if comp_sub_themes:
             payload['competency_sub_themes'] = [s.strip() for s in comp_sub_themes.split(",") if s.strip()]
 
+        upload_mimes = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".vtt": "text/vtt",
+            ".txt": "text/plain",
+        }
         files = []
-        if uploaded_files:
-            for f in uploaded_files:
-                mime = "application/pdf" if f.name.endswith(".pdf") else "text/vtt"
-                files.append(('files', (f.name, f.getvalue(), mime)))
+        for field, uploads in (("transcript_files", uploaded_transcripts), ("files", uploaded_files)):
+            for f in uploads or []:
+                mime = upload_mimes.get(os.path.splitext(f.name)[1].lower(), "application/octet-stream")
+                files.append((field, (f.name, f.getvalue(), mime)))
 
         with st.spinner("Calling API..."):
             try:
@@ -615,7 +622,8 @@ with tab_view:
                         )
                         new_text = st.text_area("Question text / matching context", key="add_text")
                         st.caption(
-                            "MCQ and Multi-Choice require 2 to 5 options. "
+                            "MCQ, FTB and Multi-Choice require 2 to 5 options. "
+                            "FTB question text must contain exactly one blank (`___`). "
                             "MTF requires at least 2 pairs (one per line as `left | right`)."
                         )
                         new_opts = st.text_area(
@@ -623,8 +631,8 @@ with tab_view:
                             key="add_opts",
                         )
                         new_correct = st.text_input(
-                            "Correct answer — MCQ: 0-based index · Multi-Choice: comma-separated "
-                            "indexes · FTB: the answer text · True/False: True or False",
+                            "Correct answer — MCQ / FTB: 0-based index · Multi-Choice: "
+                            "comma-separated indexes · True/False: True or False",
                             key="add_correct",
                         )
                         st.markdown("**Answer rationale**")
@@ -711,11 +719,11 @@ with tab_view:
                                 ]
                             else:
                                 payload_q["question_text"] = new_text
-                                if new_type in ("mcq", "multichoice"):
+                                if new_type in ("mcq", "ftb", "multichoice"):
                                     payload_q["options"] = [
                                         {"text": t, "index": i} for i, t in enumerate(lines)
                                     ]
-                                    if new_type == "mcq":
+                                    if new_type in ("mcq", "ftb"):
                                         try:
                                             payload_q["correct_option_index"] = int(new_correct)
                                         except ValueError:
@@ -870,8 +878,13 @@ with tab_view:
                                     "Question text", q.get("question_text", ""),
                                     key=f"qt_{qkey}")
 
-                            # Options / answer key
-                            if bucket in ("Multiple Choice Question", "Multi-Choice Question"):
+                            # Options / answer key. An option FTB is edited exactly
+                            # like a single-select MCQ; a legacy FTB (no options)
+                            # keeps its text answer below.
+                            single_select = (bucket == "Multiple Choice Question"
+                                             or (bucket == "FTB Question"
+                                                 and not q.get("legacy_ftb")))
+                            if single_select or bucket == "Multi-Choice Question":
                                 options = q.get("options", [])
                                 st.caption(
                                     f"Options — at least 2 are required "
@@ -974,7 +987,7 @@ with tab_view:
                                     "reordering — changing this picker changes *which* "
                                     "option is correct."
                                 )
-                                if bucket == "Multiple Choice Question":
+                                if single_select:
                                     current = q.get("correct_option_index")
                                     chosen = st.selectbox(
                                         "Correct option", idxs,
@@ -1011,7 +1024,7 @@ with tab_view:
                                     "Correct answer", ["True", "False"],
                                     index=0 if str(q.get("correct_answer")) == "True" else 1,
                                     key=f"tf_{qkey}", horizontal=True)
-                            elif bucket == "FTB Question":
+                            elif bucket == "FTB Question":  # legacy FTB only
                                 updates["correct_answer"] = st.text_input(
                                     "Correct answer", q.get("correct_answer", "") or "",
                                     key=f"ftb_{qkey}")

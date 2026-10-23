@@ -63,6 +63,12 @@ BATCH_MAX_ATTEMPTS = int(os.getenv("BATCH_MAX_ATTEMPTS", "2"))
 # Escape hatch: forces every request down the original single-call path.
 ENABLE_QUESTION_BATCHING = os.getenv("ENABLE_QUESTION_BATCHING", "true").lower() == "true"
 
+# Rounds of top-up generation when a generated assessment's per-type counts do
+# not match the request (a short response, or a batch abandoned after retries).
+# Each round is a new call — split at QUESTION_BATCH_SIZE — for exactly what is
+# missing. 0 still trims extras to the request but generates nothing further.
+TOPUP_MAX_ROUNDS = int(os.getenv("TOPUP_MAX_ROUNDS", "1"))
+
 # There is deliberately no concurrency bound and no separate batch temperature.
 # Both existed only because batches used to run in parallel: one to keep
 # simultaneous calls under the Vertex quota, the other as the only available
@@ -85,6 +91,13 @@ ENABLE_QUESTION_BATCHING = os.getenv("ENABLE_QUESTION_BATCHING", "true").lower()
 # client that has already read it. Set to "false" to store fresh LLM output with
 # whatever base it was generated on.
 NORMALIZE_OPTION_INDEX_BASE = os.getenv("NORMALIZE_OPTION_INDEX_BASE", "true").lower() == "true"
+
+# Case studies are suggested, never required. A higher-order Bloom's level
+# (Apply / Analyze / Evaluate / Create) is offered to the model as eligible for
+# case studies only when it makes up at least this percentage of the whole
+# assessment. Worked out once, before batching, so every batch is told the same
+# levels — a batch's own slice of the assignment is not the assessment's mix.
+CASE_STUDY_MIN_LEVEL_PCT = float(os.getenv("CASE_STUDY_MIN_LEVEL_PCT", "20"))
 
 # Langfuse Observability (opt-in — set LANGFUSE_ENABLED=true to activate)
 LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"

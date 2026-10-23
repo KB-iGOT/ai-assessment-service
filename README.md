@@ -181,7 +181,7 @@ If a job with the same hash (course IDs + assessment type + difficulty + questio
 | Code | Full Name | Notes |
 |---|---|---|
 | `mcq` | Multiple Choice (single correct) | 4 options, one correct |
-| `ftb` | Fill in the Blank | Exact answer phrase |
+| `ftb` | Fill in the Blank | One blank, 4 options, 1 correct (legacy FTBs: exact answer phrase) |
 | `mtf` | Match the Following | Left-right pairs |
 | `multichoice` | Multiple Selection | Multiple correct options |
 | `truefalse` | True / False | Binary |
@@ -406,7 +406,7 @@ Converts the assessment JSON into downloadable documents.
 #### `exporters_csv_v2.py` — CSV export
 Generates CSV files in the iGot platform's 7-option import schema.
 
-- `generate_csv_v2()` — full 7-option schema with `QuestionType` / `QuestionTagging` columns, all question types, `Yes`/`No` correctness values
+- `generate_csv_v2()` — full 7-option schema with `QuestionType` / `QuestionTagging` columns, all question types, `Yes`/`No` correctness values. An option FTB keeps type `FTB` (blank written `<blank>`) and fills its options exactly like `MCQ-SCA`; a legacy FTB keeps its `answer, Blank1` row
 - `generate_csv_basic()` — 6-option schema, **MCQ only** (single- and multi-answer); FTB, MTF and True/False are skipped entirely. Columns are `SR`, `Question`, `Option1`–`Option6`, `IsOption1Correct`–`IsOption6Correct`, with `TRUE`/`FALSE` correctness values
 
 #### `cleanup.py` — Scheduled maintenance

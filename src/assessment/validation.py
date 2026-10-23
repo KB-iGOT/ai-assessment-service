@@ -33,7 +33,9 @@ from .questions import (
     BUCKET_MTF,
     BUCKET_MULTICHOICE,
     BUCKET_TRUEFALSE,
+    FTB_BLANK_PATTERN,
     VALID_PROVENANCE,
+    is_legacy_ftb,
     iter_questions_in_order,
     question_count,
 )
@@ -80,9 +82,13 @@ EDITABLE_FIELDS: Dict[str, set] = {
         "options",
         "correct_option_index",
     },
+    # Option FTB — the shape every FTB is generated and added in. A legacy FTB
+    # (no `options`) is edited through `LEGACY_FTB_EDITABLE` instead; see
+    # `editable_fields_for`.
     BUCKET_FTB: _COMMON_EDITABLE | {
         "question_text",
-        "correct_answer",
+        "options",
+        "correct_option_index",
     },
     BUCKET_TRUEFALSE: _COMMON_EDITABLE | {
         "question_text",
@@ -93,6 +99,23 @@ EDITABLE_FIELDS: Dict[str, set] = {
         "pairs",
     },
 }
+
+# A legacy FTB keeps the fields it has always had. `options` is deliberately
+# absent, so a legacy FTB can never be converted to an option FTB.
+LEGACY_FTB_EDITABLE = _COMMON_EDITABLE | {
+    "question_text",
+    "correct_answer",
+}
+
+
+def editable_fields_for(bucket: str, question: Optional[Dict[str, Any]] = None) -> set:
+    """
+    The editable paths for one stored question. `question` decides the FTB
+    shape; omit it (as when adding a question) to get the option-FTB set.
+    """
+    if question is not None and is_legacy_ftb(bucket, question):
+        return LEGACY_FTB_EDITABLE
+    return EDITABLE_FIELDS.get(bucket, set())
 
 # Fields the server owns; silently ignored on input rather than 400, because
 # clients naturally echo back the whole question object they were served.
@@ -203,7 +226,18 @@ def validate_question(
     if bucket in (BUCKET_MCQ, BUCKET_MULTICHOICE):
         errors.extend(_validate_options(bucket, question, qid))
     elif bucket == BUCKET_FTB:
-        if _is_blank(question.get("correct_answer")):
+        if not is_legacy_ftb(bucket, question):
+            errors.extend(_validate_options(bucket, question, qid))
+            text = question.get("question_text")
+            if not _is_blank(text):
+                blanks = len(FTB_BLANK_PATTERN.findall(str(text)))
+                if blanks != 1:
+                    errors.append(_err("ftb_blank_count_invalid", "question_text", qid,
+                                       expected=1, found=blanks))
+        elif is_new_question:
+            # Every FTB added from now on is an option FTB.
+            errors.append(_err("options_required", "options", qid))
+        elif _is_blank(question.get("correct_answer")):
             errors.append(_err("correct_answer_required", "correct_answer", qid))
     elif bucket == BUCKET_TRUEFALSE:
         if str(question.get("correct_answer")) not in ("True", "False"):
@@ -286,7 +320,7 @@ def _validate_options(bucket: str, question: Dict[str, Any],
     valid_indexes = set(indexes)
     correct = question.get("correct_option_index")
 
-    if bucket == BUCKET_MCQ:
+    if bucket in (BUCKET_MCQ, BUCKET_FTB):
         if isinstance(correct, list):
             errors.append(_err("correct_option_index_invalid", "correct_option_index", qid,
                                expects="single_index"))
@@ -451,12 +485,15 @@ def validate_assessment(
     return errors
 
 
-def validate_editable_fields(bucket: str, updates: Dict[str, Any]) -> List[Dict[str, Any]]:
+def validate_editable_fields(
+    bucket: str, updates: Dict[str, Any], question: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
     """
     Reject dotted paths that are not editable for this question type. Keeps
     server-owned fields (`provenance`, `question_id`, ...) out of client reach.
+    `question` is the stored question, which decides the FTB shape.
     """
-    allowed = EDITABLE_FIELDS.get(bucket, set())
+    allowed = editable_fields_for(bucket, question)
     return [
         _err("field_not_editable", path, None,
              question_bucket=bucket, editable_fields=sorted(allowed))
