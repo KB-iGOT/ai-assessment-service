@@ -16,6 +16,9 @@ def form(**overrides):
         "course_ids": "do_1",
         "question_type_counts": json.dumps({"mcq": 3}),
         "blooms_config": json.dumps({"remember": 50, "apply": 50}),
+        # Sent explicitly: from FastAPI 0.13x an omitted bool Form field reads
+        # as False regardless of its declared default.
+        "enable_blooms": "true",
     }
     data.update(overrides)
     return {k: v for k, v in data.items() if v is not None}

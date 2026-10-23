@@ -1,0 +1,7 @@
+# Application dependencies for the Jenkins PR validation pipeline
+# (KB-iGOT/Jenkins-Shared-Library, vars/prValidationPipeline.groovy), which
+# installs this file before running the unit tests.
+#
+# Installs this project from pyproject.toml, so the dependency list lives in
+# one place. The Docker images do not use this file.
+-e .

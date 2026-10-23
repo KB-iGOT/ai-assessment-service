@@ -1,0 +1,4 @@
+# Test dependencies, installed by the Jenkins PR validation pipeline after
+# requirements.txt. Keep in step with [dependency-groups] dev in pyproject.toml.
+pytest>=9.1.1
+pytest-asyncio>=1.4.0
