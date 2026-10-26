@@ -12,7 +12,7 @@ import shutil
 # Reuse existing modules
 from .db import init_db, close_db, update_job_status, save_assessment_result
 from .fetcher import fetch_course_data
-from .generator import generate_assessment
+from .generator import GenerationRequest, generate_assessment
 from .events import get_kafka_consumer, send_completion_event, stop_kafka_producer
 from .config import INTERACTIVE_COURSES_PATH
 from .storage import get_storage_service
@@ -106,7 +106,7 @@ async def process_job(payload: Dict[str, Any]):
             course_ids=str(course_ids),
             model=str(os.getenv("GENAI_MODEL_NAME", "unknown")),
         ):
-            metadata, assessment, usage = await generate_assessment(
+            metadata, assessment, usage = await generate_assessment(GenerationRequest(
                 course_ids=course_ids,
                 assessment_type=assessment_type,
                 difficulty_level=payload.get('difficulty'),
@@ -125,7 +125,7 @@ async def process_job(payload: Dict[str, Any]):
                 competency_themes=payload.get('competency_themes'),
                 competency_sub_themes=payload.get('competency_sub_themes'),
                 course_names=payload.get('course_names', []),
-            )
+            ))
         llm_duration = round(time.monotonic() - t_llm, 2)
         input_tokens = usage.get('prompt_token_count', 'N/A') if usage else 'N/A'
         output_tokens = usage.get('candidates_token_count', 'N/A') if usage else 'N/A'

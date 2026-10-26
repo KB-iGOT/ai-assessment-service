@@ -10,8 +10,9 @@ import fitz  # PyMuPDF
 import docx  # python-docx
 import re
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, Optional, List, TypedDict
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ServerError, ClientError
@@ -772,32 +773,57 @@ async def _reconcile_single_call(
     return result_json, usage
 
 
-async def generate_assessment(
-    question_type_counts: Dict[str, int],
-    course_folder: Optional[Path] = None, # Deprecated in v3.2, kept for backward compat
-    assessment_type: str = "final",
-    difficulty_level: str = "Intermediate",
-    total_questions: int = 5,
-    time_to_complete: Optional[str] = None,
-    additional_instructions: Optional[str] = None,
-    input_language: str = "English",
-    course_ids: List[str] = None,
-    topic_names: Optional[List[str]] = None,
-    blooms_distribution: Optional[Dict[str, int]] = None,
-    enable_blooms: bool = True,
-    course_weightage: Optional[str] = None,
-    time_limit: Optional[int] = None,
-    extra_files: Optional[List[Path]] = None,
-    transcript_files: Optional[List[Path]] = None,
-    competency_area: Optional[str] = None,
-    competency_themes: Optional[str] = None,
-    competency_sub_themes: Optional[str] = None,
-    course_names: Optional[List[str]] = None,
-) -> Tuple[Dict, Dict, Dict]:
+@dataclass
+class GenerationRequest:
+    """Everything one `generate_assessment` call needs, as sent by the worker."""
+
+    question_type_counts: Dict[str, int]
+    course_folder: Optional[Path] = None  # Deprecated in v3.2, kept for backward compat
+    assessment_type: str = "final"
+    difficulty_level: str = "Intermediate"
+    total_questions: int = 5
+    time_to_complete: Optional[str] = None
+    additional_instructions: Optional[str] = None
+    input_language: str = "English"
+    course_ids: Optional[List[str]] = None
+    topic_names: Optional[List[str]] = None
+    blooms_distribution: Optional[Dict[str, int]] = None
+    enable_blooms: bool = True
+    course_weightage: Optional[str] = None
+    time_limit: Optional[int] = None
+    extra_files: Optional[List[Path]] = None
+    transcript_files: Optional[List[Path]] = None
+    competency_area: Optional[str] = None
+    competency_themes: Optional[str] = None
+    competency_sub_themes: Optional[str] = None
+    course_names: Optional[List[str]] = None
+
+
+async def generate_assessment(request: GenerationRequest) -> Tuple[Dict, Dict, Dict]:
     """
     Generates assessment for one or multiple courses.
     Returns (aggregated_metadata, assessment_json, usage_metadata)
     """
+    question_type_counts = request.question_type_counts
+    course_folder = request.course_folder
+    assessment_type = request.assessment_type
+    difficulty_level = request.difficulty_level
+    total_questions = request.total_questions
+    additional_instructions = request.additional_instructions
+    input_language = request.input_language
+    course_ids = request.course_ids
+    topic_names = request.topic_names
+    blooms_distribution = request.blooms_distribution
+    enable_blooms = request.enable_blooms
+    course_weightage = request.course_weightage
+    time_limit = request.time_limit
+    extra_files = request.extra_files
+    transcript_files = request.transcript_files
+    competency_area = request.competency_area
+    competency_themes = request.competency_themes
+    competency_sub_themes = request.competency_sub_themes
+    course_names = request.course_names
+
     # Normalize inputs
     if not course_ids and course_folder:
         course_ids = [course_folder.name]
@@ -911,11 +937,11 @@ async def generate_assessment(
 
     # ---- Single-call path (unchanged) ----
     prompt = build_prompt(
+        shared_prompt_inputs,
         question_type_counts=question_type_counts,
         total_questions=total_questions,
         blooms_distribution=blooms_str,
         course_weightage_instruction=course_weightage_instruction,
-        **shared_prompt_inputs,
     )
 
     # 6. Call LLM
@@ -1112,6 +1138,7 @@ async def _run_batches(
 
     for batch in batches:
         prompt = build_prompt(
+            batch_prompt_inputs,
             question_type_counts=batch.type_counts,
             total_questions=batch.total,
             blooms_distribution=(
@@ -1131,7 +1158,6 @@ async def _run_batches(
                 else ASSESSMENT_PROMPTS.get("output_format_section_batch", "")
             ),
             previously_generated=format_previously_generated(digest),
-            **batch_prompt_inputs,
         )
         schema = ASSESSMENT_SCHEMA if batch.is_final else schema_without_blueprint()
 
@@ -1561,23 +1587,36 @@ def _merge_usage(usage_list: List[Optional[Dict[str, Any]]]) -> Dict[str, Any]:
     return merged
 
 
+class PromptInputs(TypedDict, total=False):
+    """
+    The prompt values shared by every call for one assessment — the single
+    call, every batch and every top-up. Built once in `generate_assessment`
+    (`shared_prompt_inputs`); a batch gets a copy with `time_to_complete`
+    restated for its slice (`_batch_prompt_inputs`).
+
+    `competency_focus_instruction` and `case_study_levels` are optional; the
+    rest are required.
+    """
+    course_context: str
+    learning_objectives_str: str
+    transcript: str
+    pdf_snippets: str
+    assessment_type: str
+    difficulty_level: str
+    time_to_complete: Optional[str]
+    additional_instructions: Optional[str]
+    input_language: str
+    topic_names: str
+    competency_focus_instruction: str
+    case_study_levels: str
+
+
 def build_prompt(
-    question_type_counts:Dict[str, int],
-    course_context: str,
-    learning_objectives_str: str,
-    transcript: str,
-    pdf_snippets: str,
-    assessment_type: str,
-    difficulty_level: str,
+    inputs: PromptInputs,
+    question_type_counts: Dict[str, int],
     total_questions: int,
-    time_to_complete: Optional[str],
-    additional_instructions: Optional[str],
-    input_language: str,
-    topic_names: str,
     blooms_distribution: str,
     course_weightage_instruction: str,
-    competency_focus_instruction: str = "Not applicable for this assessment type.",
-    case_study_levels: str = "None",
     *,
     total_questions_text: Optional[str] = None,
     blueprint_section: Optional[str] = None,
@@ -1598,7 +1637,24 @@ def build_prompt(
         one that authors a blueprint.
       * `output_format_section` — the questions-only variant for those batches.
       * `previously_generated` — the list of questions earlier batches produced.
+
+    `inputs` carries the values shared by every call for one assessment; see
+    `PromptInputs`.
     """
+    course_context = inputs["course_context"]
+    learning_objectives_str = inputs["learning_objectives_str"]
+    transcript = inputs["transcript"]
+    pdf_snippets = inputs["pdf_snippets"]
+    assessment_type = inputs["assessment_type"]
+    difficulty_level = inputs["difficulty_level"]
+    time_to_complete = inputs["time_to_complete"]
+    additional_instructions = inputs["additional_instructions"]
+    input_language = inputs["input_language"]
+    topic_names = inputs["topic_names"]
+    competency_focus_instruction = inputs.get(
+        "competency_focus_instruction", "Not applicable for this assessment type.")
+    case_study_levels = inputs.get("case_study_levels", "None")
+
     prompt_template = ASSESSMENT_PROMPTS.get('system_prompt_template', '')
 
     if blueprint_section is None:
