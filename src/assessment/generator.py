@@ -460,318 +460,6 @@ def case_study_levels(
     ]
 
 
-def _split_names(value: Any) -> List[str]:
-    """A list as given, or a comma-separated string split into stripped names."""
-    if isinstance(value, list):
-        return value
-    if not value:
-        return []
-    return [name.strip() for name in value.split(",") if name.strip()]
-
-
-def _read_course_metadata(c_path: Path) -> Tuple[Optional[Dict[str, Any]], List[str]]:
-    """A course folder's metadata.json and the learning objectives it lists."""
-    meta_path = c_path / "metadata.json"
-    if not meta_path.exists():
-        return None, []
-    meta = json.loads(meta_path.read_text(encoding='utf-8'))
-
-    # Extract Learning Objectives from the newly formatted instructions array
-    instructions = meta.get("instructions", [])
-    if isinstance(instructions, list):
-        return meta, list(instructions)
-    if isinstance(instructions, str) and instructions.strip():
-        # Fallback just in case some legacy string instructions slipped through
-        return meta, [instructions]
-    return meta, []
-
-
-async def _collect_course_files(
-    c_path: Path,
-    cid: str,
-    pattern: str,
-    extractor,
-    label: str,
-    seen_content_hashes: set,
-) -> Tuple[List[str], bool]:
-    """
-    The text of every `pattern` file under one course folder (recursive), one
-    section per file. Empty files and content already seen — in this course or
-    an earlier one, as a VTT or a PDF — are skipped.
-
-    Returns the sections and whether any file contributed.
-    """
-    sections: List[str] = []
-    found = False
-    for path in c_path.rglob(pattern):
-        try:
-            text = await extractor(path)
-            if not text:
-                continue
-
-            # Deduplication Check
-            text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
-            if text_hash in seen_content_hashes:
-                logger.info(f"Skipping duplicate {label} content: {path.name}")
-                continue
-            seen_content_hashes.add(text_hash)
-
-            rel_path = path.relative_to(c_path)
-            sections.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
-            found = True
-        except Exception as e:
-            logger.warning(f"Failed to read {label} {path}: {e}")
-    return sections, found
-
-
-async def _aggregate_course_content(
-    course_ids: List[str],
-    course_names: Optional[List[str]],
-    aggregated_metadata: Dict[str, Any],
-) -> Tuple[List[str], List[str], List[str]]:
-    """
-    Read every course folder: its metadata, learning objectives, transcripts
-    and PDFs. Course metadata and per-course content availability are recorded
-    on `aggregated_metadata`.
-
-    Returns (transcript sections, PDF sections, learning objectives).
-    """
-    base_path = Path(INTERACTIVE_COURSES_PATH)
-    transcripts: List[str] = []
-    pdfs: List[str] = []
-    learning_objectives: List[str] = []
-
-    # Deduplication Set (to prevent double-handling of leaf vs root downloads)
-    seen_content_hashes: set = set()
-
-    for idx, cid in enumerate(course_ids):
-        c_path = base_path / cid
-        if not c_path.exists():
-            logger.warning(f"Course folder {cid} not found, skipping.")
-            # If caller supplied a course name, inject it so LLM never outputs N/A
-            fallback_name = (course_names or [])[idx] if course_names and idx < len(course_names) else None
-            if fallback_name:
-                aggregated_metadata["courses"].append({"name": fallback_name, "identifier": cid})
-                logger.info(f"Injected fallback course name '{fallback_name}' for {cid}")
-            continue
-
-        meta, course_objectives = _read_course_metadata(c_path)
-        if meta is not None:
-            aggregated_metadata["courses"].append(meta)
-            learning_objectives.extend(course_objectives)
-
-        # Transcript (Recursive - find all english_subtitles.vtt in subfolders)
-        vtt_sections, vtt_found = await _collect_course_files(
-            c_path, cid, "english_subtitles.vtt", extract_vtt_text, "VTT", seen_content_hashes,
-        )
-        # PDFs (Recursive - find all PDFs in subfolders)
-        pdf_sections, pdf_found = await _collect_course_files(
-            c_path, cid, "*.pdf", extract_pdf_text, "PDF", seen_content_hashes,
-        )
-        transcripts.extend(vtt_sections)
-        pdfs.extend(pdf_sections)
-
-        aggregated_metadata["content_availability"][cid] = {
-            "has_vtt": vtt_found,
-            "has_pdf": pdf_found,
-        }
-
-    return transcripts, pdfs, learning_objectives
-
-
-def _competency_only_context(
-    competency_area: str,
-    competency_themes: Any,
-    competency_sub_themes: Any,
-) -> Tuple[Optional[str], Dict[str, str]]:
-    """
-    Context for a competency assessment with no course content: the KCM
-    descriptions matching the requested themes / sub-themes, and the course
-    entry that stands in for a real course.
-
-    Returns (KCM transcript section or None when nothing matched, course entry).
-    """
-    themes_list = _split_names(competency_themes)
-    sub_themes_list = _split_names(competency_sub_themes)
-    matched = [
-        entry for entry in KCM_DESCRIPTIONS_FILE
-        if (
-            entry.get("Area", "").lower() in [t.lower() for t in themes_list] or
-            entry.get("Label", "").lower() in [s.lower() for s in sub_themes_list]
-        )
-    ]
-    kcm_section = None
-    if matched:
-        kcm_content = "\n\n".join([
-            f"Sub-Theme: {e.get('Label')}\nArea: {e.get('Area')}\nDescription: {e.get('Description')}\nLevels: {json.dumps(e.get('Levels', {}))}"
-            for e in matched
-        ])
-        kcm_section = f"--- KCM COMPETENCY REFERENCE ---\n{kcm_content}"
-        logger.info(f"Competency-only mode: injected {len(matched)} KCM entries for area='{competency_area}' themes={themes_list} sub_themes={sub_themes_list}")
-    course = {
-        "name": f"Competency Assessment — {competency_area}",
-        "code": "KCM_COMPETENCY",
-        "description": f"Assessment generated from KCM competency framework. Area: {competency_area}, Themes: {', '.join(themes_list)}, Sub-Themes: {', '.join(sub_themes_list)}"
-    }
-    return kcm_section, course
-
-
-async def _collect_uploads(
-    extra_files: Optional[List[Path]],
-    transcript_files: Optional[List[Path]],
-) -> Tuple[List[str], List[str], Dict[str, bool]]:
-    """
-    Text of the files uploaded through the API. The field decides the prompt
-    section, the extension only decides how text is extracted:
-    `transcript_files` go to TRANSCRIPTS, `extra_files` (supporting documents)
-    to document content.
-
-    Returns (transcript sections, document sections, content availability).
-    """
-    transcripts: List[str] = []
-    documents: List[str] = []
-    uploads = [(p, True) for p in (transcript_files or [])] + [
-        (p, False) for p in (extra_files or [])
-    ]
-    for fpath, is_transcript in uploads:
-        text = await extract_uploaded_text(fpath)
-        if not text:
-            logger.warning(f"No text extracted from uploaded file {fpath.name} — it will not contribute to the prompt")
-            continue
-        if is_transcript:
-            transcripts.append(f"--- UPLOADED TRANSCRIPT: {fpath.name} ---\n{text}")
-        else:
-            documents.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
-    # Key names kept for API compatibility: has_vtt = transcript content,
-    # has_pdf = supporting-document content (any accepted format).
-    availability = {"has_vtt": bool(transcripts), "has_pdf": bool(documents)}
-    return transcripts, documents, availability
-
-
-def _format_learning_objectives(learning_objectives: List[str]) -> str:
-    """Learning objectives as a readable list for the prompt."""
-    if not learning_objectives:
-        return "None explicitly provided. Synthesize appropriate Learning Objectives based on the course content."
-    # Deduplicate LOs just in case multiple modules had the exact same strings
-    unique_los = list(dict.fromkeys(learning_objectives))
-    return "\n".join([f"- {lo}" for lo in unique_los])
-
-
-def _blooms_inputs(
-    enable_blooms: bool,
-    blooms_distribution: Optional[Dict[str, int]],
-    difficulty_level: Optional[str],
-    question_type_counts: Optional[Dict[str, int]],
-) -> Tuple[Dict[str, List[str]], Dict[str, float], str]:
-    """
-    The Bloom's inputs for the prompt.
-
-    Returns:
-      * `blooms_by_type` — the per-type assignment. The batched path slices it
-        per batch; it stays empty on the two branches that have no per-type
-        assignment to slice (disabled, and percentage defaults).
-      * `blooms_weights` — the whole assessment's mix, for `case_study_levels`.
-      * the formatted string the prompt renders.
-    """
-    if not enable_blooms:
-        return {}, {}, "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
-
-    if not blooms_distribution:
-        # Dynamic defaults based on Difficulty Level (PRD Requirement)
-        blooms_weights = DEFAULT_BLOOMS_BY_DIFFICULTY.get(
-            (difficulty_level or "").lower(), DEFAULT_BLOOMS_FALLBACK,
-        )
-        blooms_str = ", ".join(f"{level}: {pct}%" for level, pct in blooms_weights.items())
-        return {}, blooms_weights, blooms_str
-
-    # Distribute bloom levels per question type so the LLM gets unambiguous assignments.
-    # A flat numbered list is unreliable because the LLM writes questions grouped by type,
-    # not as a flat sequence — it cannot map "Question N" to the right type bucket.
-    blooms_by_type = compute_blooms_by_type(blooms_distribution, question_type_counts or {})
-    blooms_str = format_blooms_by_type(blooms_by_type)
-    blooms_weights = Counter(level for levels in blooms_by_type.values() for level in levels)
-    logger.info(f"Blooms by type: { {k: v for k, v in blooms_by_type.items()} }")
-    return blooms_by_type, blooms_weights, blooms_str
-
-
-def _competency_focus_instruction(
-    assessment_type: str,
-    competency_area: Optional[str],
-    competency_themes: Any,
-    competency_sub_themes: Any,
-) -> str:
-    """The competency focus instruction; only a competency assessment gets one."""
-    if not (assessment_type == "competency" and competency_area):
-        return "Not applicable for this assessment type."
-    themes_list = _split_names(competency_themes)
-    sub_themes_list = _split_names(competency_sub_themes)
-    return (
-        f"Competency Area: {competency_area}\n"
-        f"Competency Themes: {', '.join(themes_list)}\n"
-        f"Competency Sub-Themes: {', '.join(sub_themes_list)}\n"
-        f"ALL questions MUST map to one of the above sub-themes. No other competencies are permitted."
-    )
-
-
-async def _reconcile_single_call(
-    result_json: Any,
-    usage: Dict[str, Any],
-    *,
-    question_type_counts: Dict[str, int],
-    requested_total: int,
-    blooms_by_type: Dict[str, List[str]],
-    blooms_str: str,
-    course_weightage: Optional[Any],
-    aggregated_metadata: Dict[str, Any],
-    shared_prompt_inputs: Dict[str, Any],
-    time_limit: Optional[int],
-    job_id: str,
-) -> Tuple[Any, Dict[str, Any]]:
-    """
-    Bring a single-call response's per-type counts to the request. A response
-    whose counts already match is returned exactly as the model wrote it.
-    Nothing here may fail the job: on any error the response is returned as
-    generated, exactly as before this step existed.
-    """
-    try:
-        blueprint = result_json.get("blueprint") if isinstance(result_json, dict) else None
-        reconciled = await _reconcile_counts(
-            extract_buckets(result_json),
-            blueprint if isinstance(blueprint, dict) else {},
-            question_type_counts=question_type_counts,
-            requested_total=requested_total,
-            blooms_by_type=blooms_by_type,
-            blooms_str=blooms_str,
-            course_weightage=course_weightage,
-            aggregated_metadata=aggregated_metadata,
-            shared_prompt_inputs=shared_prompt_inputs,
-            job_id=job_id,
-        )
-        if reconciled:
-            questions, blueprint, topup_usages = reconciled
-            # The model's blueprint tallied the questions it wrote, not the
-            # set kept, so its counted fields are recounted — as the batched
-            # path always does.
-            reconciled_json = dict(result_json) if isinstance(result_json, dict) else {}
-            reconciled_json["questions"] = questions
-            reconciled_json["blueprint"] = _recount_generated_fields(
-                blueprint, questions,
-                assessment_type=shared_prompt_inputs.get("assessment_type"),
-                difficulty_level=shared_prompt_inputs.get("difficulty_level"),
-                input_language=shared_prompt_inputs.get("input_language"),
-                aggregated_metadata=aggregated_metadata,
-                time_limit=time_limit,
-            )
-            reconciled_usage = _merge_usage([usage] + topup_usages) if topup_usages else usage
-            return reconciled_json, reconciled_usage
-    except Exception:
-        logger.exception(
-            f"[{job_id}] Count reconciliation failed — returning the "
-            f"response as generated"
-        )
-    return result_json, usage
-
-
 async def generate_assessment(
     question_type_counts: Dict[str, int],
     course_folder: Optional[Path] = None, # Deprecated in v3.2, kept for backward compat
@@ -801,7 +489,11 @@ async def generate_assessment(
     # Normalize inputs
     if not course_ids and course_folder:
         course_ids = [course_folder.name]
-
+    
+    # Normalize inputs
+    if not course_ids and course_folder:
+        course_ids = [course_folder.name]
+    
     # if not course_ids:
     #     raise ValueError("No course_ids provided.")
 
@@ -811,52 +503,185 @@ async def generate_assessment(
         composite_id = f"comprehensive_{'_'.join(sorted_ids)}" if len(sorted_ids) > 1 else sorted_ids[0]
     else:
         composite_id = "custom_content_generation"
-
+    
+    base_path = Path(INTERACTIVE_COURSES_PATH)
+    
     logger.info(f"Generating assessment for {composite_id} (Type: {assessment_type})")
 
-    # 1. Aggregate Content — from the course folders, or the KCM descriptions
-    #    for a competency assessment, or nothing but the uploaded files.
+    # 1. Aggregate Content from All Courses
     aggregated_metadata = {"courses": [], "content_availability": {}}
-    combined_transcript: List[str] = []
-    combined_pdfs: List[str] = []
-    combined_learning_objectives: List[str] = []
+    combined_transcript = []
+    combined_pdfs = []
+    
+    # Aggregate Learning Objectives specifically
+    combined_learning_objectives = []
+    
+    # Deduplication Set (to prevent double-handling of leaf vs root downloads)
+    seen_content_hashes = set()
 
     if course_ids:
-        combined_transcript, combined_pdfs, combined_learning_objectives = (
-            await _aggregate_course_content(course_ids, course_names, aggregated_metadata)
-        )
-    elif assessment_type == "competency" and competency_area:
-        kcm_section, course = _competency_only_context(
-            competency_area, competency_themes, competency_sub_themes,
-        )
-        if kcm_section:
-            combined_transcript.append(kcm_section)
-        aggregated_metadata["courses"].append(course)
-    else:
-        # Dummy Metadata for Custom Uploads
-        aggregated_metadata["courses"].append({
-            "name": "User Uploaded Content",
-            "code": "CUSTOM_UPLOAD",
-            "description": "Assessment generated from user provided files (transcripts/documents)."
-        })
+        for idx, cid in enumerate(course_ids):
+            c_path = base_path / cid
+            if not c_path.exists():
+                logger.warning(f"Course folder {cid} not found, skipping.")
+                # If caller supplied a course name, inject it so LLM never outputs N/A
+                fallback_name = (course_names or [])[idx] if course_names and idx < len(course_names) else None
+                if fallback_name:
+                    aggregated_metadata["courses"].append({"name": fallback_name, "identifier": cid})
+                    logger.info(f"Injected fallback course name '{fallback_name}' for {cid}")
+                continue
+                
+            # Metadata
+            meta_path = c_path / "metadata.json"
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding='utf-8'))
+                aggregated_metadata["courses"].append(meta)
+                
+                # Extract Learning Objectives from the newly formatted instructions array
+                instructions = meta.get("instructions", [])
+                if isinstance(instructions, list):
+                    combined_learning_objectives.extend(instructions)
+                elif isinstance(instructions, str) and instructions.strip():
+                     # Fallback just in case some legacy string instructions slipped through
+                     combined_learning_objectives.append(instructions)
+                
+            # Transcript (Recursive - find all english_subtitles.vtt in subfolders)
+            vtt_found = False
+            for vtt_path in c_path.rglob("english_subtitles.vtt"):
+                 try:
+                     text = await extract_vtt_text(vtt_path)
+                     if not text: continue
 
-    # Process Uploaded Files (from API).
+                     # Deduplication Check
+                     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+                     if text_hash in seen_content_hashes:
+                         logger.info(f"Skipping duplicate VTT content: {vtt_path.name}")
+                         continue
+                     seen_content_hashes.add(text_hash)
+
+                     rel_path = vtt_path.relative_to(c_path)
+                     combined_transcript.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
+                     vtt_found = True
+                 except Exception as e:
+                     logger.warning(f"Failed to read VTT {vtt_path}: {e}")
+
+            # PDFs (Recursive - find all PDFs in subfolders)
+            pdf_found = False
+            for pdf_file in c_path.rglob("*.pdf"):
+                 try:
+                    text = await extract_pdf_text(pdf_file)
+                    if not text: continue
+
+                    # Deduplication Check
+                    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+                    if text_hash in seen_content_hashes:
+                        logger.info(f"Skipping duplicate PDF content: {pdf_file.name}")
+                        continue
+                    seen_content_hashes.add(text_hash)
+
+                    rel_path = pdf_file.relative_to(c_path)
+                    combined_pdfs.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
+                    pdf_found = True
+                 except Exception as e:
+                     logger.warning(f"Failed to read PDF {pdf_file}: {e}")
+
+            aggregated_metadata["content_availability"][cid] = {
+                "has_vtt": vtt_found,
+                "has_pdf": pdf_found,
+            }
+    else:
+        if assessment_type == "competency" and competency_area:
+            # No course content — build context from KCM descriptions matching the requested area/themes/sub-themes
+            themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
+            sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
+            matched = [
+                entry for entry in KCM_DESCRIPTIONS_FILE
+                if (
+                    entry.get("Area", "").lower() in [t.lower() for t in themes_list] or
+                    entry.get("Label", "").lower() in [s.lower() for s in sub_themes_list]
+                )
+            ]
+            if matched:
+                kcm_content = "\n\n".join([
+                    f"Sub-Theme: {e.get('Label')}\nArea: {e.get('Area')}\nDescription: {e.get('Description')}\nLevels: {json.dumps(e.get('Levels', {}))}"
+                    for e in matched
+                ])
+                combined_transcript.append(f"--- KCM COMPETENCY REFERENCE ---\n{kcm_content}")
+                logger.info(f"Competency-only mode: injected {len(matched)} KCM entries for area='{competency_area}' themes={themes_list} sub_themes={sub_themes_list}")
+            aggregated_metadata["courses"].append({
+                "name": f"Competency Assessment — {competency_area}",
+                "code": "KCM_COMPETENCY",
+                "description": f"Assessment generated from KCM competency framework. Area: {competency_area}, Themes: {', '.join(themes_list)}, Sub-Themes: {', '.join(sub_themes_list)}"
+            })
+        else:
+            # Dummy Metadata for Custom Uploads
+            aggregated_metadata["courses"].append({
+                "name": "User Uploaded Content",
+                "code": "CUSTOM_UPLOAD",
+                "description": "Assessment generated from user provided files (transcripts/documents)."
+            })
+
+    # Process Uploaded Files (from API). The field decides the prompt section,
+    # the extension only decides how text is extracted: `transcript_files` go
+    # to TRANSCRIPTS, `extra_files` (supporting documents) to document content.
     if extra_files or transcript_files:
-        uploaded_transcripts, uploaded_docs, availability = await _collect_uploads(
-            extra_files, transcript_files,
-        )
-        combined_transcript.extend(uploaded_transcripts)
-        combined_pdfs.extend(uploaded_docs)
-        aggregated_metadata["content_availability"]["uploaded_files"] = availability
+        uploaded_transcript = False
+        uploaded_docs = False
+        uploads = [(p, True) for p in (transcript_files or [])] + [
+            (p, False) for p in (extra_files or [])
+        ]
+        for fpath, is_transcript in uploads:
+            text = await extract_uploaded_text(fpath)
+            if not text:
+                logger.warning(f"No text extracted from uploaded file {fpath.name} — it will not contribute to the prompt")
+                continue
+            if is_transcript:
+                combined_transcript.append(f"--- UPLOADED TRANSCRIPT: {fpath.name} ---\n{text}")
+                uploaded_transcript = True
+            else:
+                combined_pdfs.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
+                uploaded_docs = True
+        # Key names kept for API compatibility: has_vtt = transcript content,
+        # has_pdf = supporting-document content (any accepted format).
+        aggregated_metadata["content_availability"]["uploaded_files"] = {
+            "has_vtt": uploaded_transcript,
+            "has_pdf": uploaded_docs,
+        }
 
     final_transcript_str = "\n\n".join(combined_transcript) if combined_transcript else "N/A"
     final_pdf_str = "\n\n".join(combined_pdfs) if combined_pdfs else "N/A"
-    final_lo_str = _format_learning_objectives(combined_learning_objectives)
-
+    
+    # Format Learning Objectives into a nice readable list for the prompt
+    if not combined_learning_objectives:
+        final_lo_str = "None explicitly provided. Synthesize appropriate Learning Objectives based on the course content."
+    else:
+        # Deduplicate LOs just in case multiple modules had the exact same strings
+        unique_los = list(dict.fromkeys(combined_learning_objectives))
+        final_lo_str = "\n".join([f"- {lo}" for lo in unique_los])
+    
     # 2. Format Bloom's Distribution
-    blooms_by_type, blooms_weights, blooms_str = _blooms_inputs(
-        enable_blooms, blooms_distribution, difficulty_level, question_type_counts,
-    )
+    #    `blooms_by_type` is kept alongside the formatted string: the batched path
+    #    slices it per batch, and it stays empty on the two branches that have no
+    #    per-type assignment to slice (disabled, and percentage defaults).
+    #    `blooms_weights` is the whole assessment's mix, for `case_study_levels`.
+    blooms_by_type: Dict[str, List[str]] = {}
+    blooms_weights: Dict[str, float] = {}
+    if not enable_blooms:
+        blooms_str = "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
+    elif not blooms_distribution:
+        # Dynamic defaults based on Difficulty Level (PRD Requirement)
+        blooms_weights = DEFAULT_BLOOMS_BY_DIFFICULTY.get(
+            (difficulty_level or "").lower(), DEFAULT_BLOOMS_FALLBACK,
+        )
+        blooms_str = ", ".join(f"{level}: {pct}%" for level, pct in blooms_weights.items())
+    else:
+        # Distribute bloom levels per question type so the LLM gets unambiguous assignments.
+        # A flat numbered list is unreliable because the LLM writes questions grouped by type,
+        # not as a flat sequence — it cannot map "Question N" to the right type bucket.
+        blooms_by_type = compute_blooms_by_type(blooms_distribution, question_type_counts or {})
+        blooms_str = format_blooms_by_type(blooms_by_type)
+        blooms_weights = Counter(level for levels in blooms_by_type.values() for level in levels)
+        logger.info(f"Blooms by type: { {k: v for k, v in blooms_by_type.items()} }")
 
     eligible_case_study_levels = case_study_levels(blooms_weights, difficulty_level)
     logger.info(f"Case study eligible levels: {eligible_case_study_levels or 'None'}")
@@ -868,9 +693,16 @@ async def generate_assessment(
     course_weightage_instruction = build_course_distribution_instruction(course_weightage)
 
     # Build competency focus instruction for competency assessment type
-    competency_focus_instruction = _competency_focus_instruction(
-        assessment_type, competency_area, competency_themes, competency_sub_themes,
-    )
+    competency_focus_instruction = "Not applicable for this assessment type."
+    if assessment_type == "competency" and competency_area:
+        themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
+        sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
+        competency_focus_instruction = (
+            f"Competency Area: {competency_area}\n"
+            f"Competency Themes: {', '.join(themes_list)}\n"
+            f"Competency Sub-Themes: {', '.join(sub_themes_list)}\n"
+            f"ALL questions MUST map to one of the above sub-themes. No other competencies are permitted."
+        )
 
     # 5. Choose the generation path.
     #    The per-type counts are what actually gets generated, so they — not
@@ -894,7 +726,66 @@ async def generate_assessment(
         case_study_levels=", ".join(eligible_case_study_levels) or "None",
     )
 
-    if use_batching:
+    if not use_batching:
+        # ---- Single-call path (unchanged) ----
+        prompt = build_prompt(
+            question_type_counts=question_type_counts,
+            total_questions=total_questions,
+            blooms_distribution=blooms_str,
+            course_weightage_instruction=course_weightage_instruction,
+            **shared_prompt_inputs,
+        )
+
+        # 6. Call LLM
+        response_text, usage = await call_llm(prompt)
+
+        try:
+            result_json = json.loads(response_text)
+        except json.JSONDecodeError:
+            logger.error("Failed to parse LLM response as JSON")
+            raise ValueError("LLM response was not valid JSON")
+
+        # 7. Bring the per-type counts to the request. A response whose counts
+        #    already match is returned exactly as the model wrote it. Nothing
+        #    here may fail the job: on any error the response is returned as
+        #    generated, exactly as before this step existed.
+        try:
+            blueprint = result_json.get("blueprint") if isinstance(result_json, dict) else None
+            reconciled = await _reconcile_counts(
+                extract_buckets(result_json),
+                blueprint if isinstance(blueprint, dict) else {},
+                question_type_counts=question_type_counts,
+                requested_total=requested_total,
+                blooms_by_type=blooms_by_type,
+                blooms_str=blooms_str,
+                course_weightage=course_weightage,
+                aggregated_metadata=aggregated_metadata,
+                shared_prompt_inputs=shared_prompt_inputs,
+                job_id=composite_id,
+            )
+            if reconciled:
+                questions, blueprint, topup_usages = reconciled
+                # The model's blueprint tallied the questions it wrote, not the
+                # set kept, so its counted fields are recounted — as the batched
+                # path always does.
+                reconciled_json = dict(result_json) if isinstance(result_json, dict) else {}
+                reconciled_json["questions"] = questions
+                reconciled_json["blueprint"] = _recount_generated_fields(
+                    blueprint, questions,
+                    assessment_type=assessment_type,
+                    difficulty_level=difficulty_level,
+                    input_language=input_language,
+                    aggregated_metadata=aggregated_metadata,
+                    time_limit=time_limit,
+                )
+                reconciled_usage = _merge_usage([usage] + topup_usages) if topup_usages else usage
+                result_json, usage = reconciled_json, reconciled_usage
+        except Exception:
+            logger.exception(
+                f"[{composite_id}] Count reconciliation failed — returning the "
+                f"response as generated"
+            )
+    else:
         # ---- Batched path ----
         result_json, usage = await _generate_in_batches(
             question_type_counts=question_type_counts,
@@ -907,42 +798,8 @@ async def generate_assessment(
             time_limit=time_limit,
             job_id=composite_id,
         )
-        return aggregated_metadata, result_json, usage
-
-    # ---- Single-call path (unchanged) ----
-    prompt = build_prompt(
-        question_type_counts=question_type_counts,
-        total_questions=total_questions,
-        blooms_distribution=blooms_str,
-        course_weightage_instruction=course_weightage_instruction,
-        **shared_prompt_inputs,
-    )
-
-    # 6. Call LLM
-    response_text, usage = await call_llm(prompt)
-
-    try:
-        result_json = json.loads(response_text)
-    except json.JSONDecodeError:
-        logger.error("Failed to parse LLM response as JSON")
-        raise ValueError("LLM response was not valid JSON")
-
-    # 7. Bring the per-type counts to the request.
-    result_json, usage = await _reconcile_single_call(
-        result_json, usage,
-        question_type_counts=question_type_counts,
-        requested_total=requested_total,
-        blooms_by_type=blooms_by_type,
-        blooms_str=blooms_str,
-        course_weightage=course_weightage,
-        aggregated_metadata=aggregated_metadata,
-        shared_prompt_inputs=shared_prompt_inputs,
-        time_limit=time_limit,
-        job_id=composite_id,
-    )
 
     return aggregated_metadata, result_json, usage
-
 
 async def _generate_in_batches(
     *,
