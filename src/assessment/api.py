@@ -131,7 +131,7 @@ from .auth import get_current_user
 api_v1_router = APIRouter(prefix="/ai-assessments/v1", tags=["AI Assessments"])
 
 @api_v1_router.post("/generate")
-async def generate_v1(
+async def generate_v1(  # NOSONAR - FastAPI form endpoint: each parameter is a form field of the public API
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user), # AUTH REQUIREMENT
     course_ids: Optional[List[str]] = Form(None, description="List of Course IDs"),
