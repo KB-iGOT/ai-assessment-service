@@ -343,3 +343,100 @@ async def test_uploaded_transcript_and_document_land_in_their_own_sections(monke
     assert "UPLOADED TRANSCRIPT: talk.txt" in transcripts_part and "TRANSCRIPT BODY" in transcripts_part
     assert "UPLOADED FILE: notes.txt" in pdf_part and "DOCUMENT BODY" in pdf_part
     assert meta["content_availability"]["uploaded_files"] == {"has_vtt": True, "has_pdf": True}
+
+
+# --------------------------------------------------------------------------
+# generate_assessment batched path (_generate_in_batches), LLM mocked
+# --------------------------------------------------------------------------
+
+def _batch_response(mcq_texts, blueprint=True):
+    body = {"questions": {BUCKET_MCQ: [q(t, "Remember") for t in mcq_texts]}}
+    if blueprint:
+        body["blueprint"] = {"title": "bp"}
+    return json.dumps(body)
+
+
+@pytest.fixture
+def batch_size_two(monkeypatch):
+    """Force batching for a 3-question request: two calls of 2 + 1."""
+    from assessment import batching
+
+    monkeypatch.setattr(gen, "QUESTION_BATCH_SIZE", 2)
+    monkeypatch.setattr(batching, "QUESTION_BATCH_SIZE", 2)
+    monkeypatch.setattr(gen, "ENABLE_QUESTION_BATCHING", True)
+    monkeypatch.setattr(gen, "BATCH_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(gen, "TOPUP_MAX_ROUNDS", 1)
+
+
+class UsageLLM(FakeLLM):
+    """FakeLLM whose every call reports 10 tokens, so summing can be checked."""
+
+    async def __call__(self, prompt, *, schema=None):
+        text, _ = await super().__call__(prompt, schema=schema)
+        return text, {"total_token_count": 10, "prompt_token_count": 7}
+
+
+async def test_batched_run_merges_batches_and_sums_usage(monkeypatch, batch_size_two):
+    llm = UsageLLM([_batch_response(["STEM-ALPHA", "b"], blueprint=False), _batch_response(["c"])])
+    monkeypatch.setattr(gen, "call_llm", llm)
+
+    _, result, usage = await gen.generate_assessment({"mcq": 3}, enable_blooms=False, time_limit=30)
+
+    assert len(llm.prompts) == 2
+    assert texts(result["questions"][BUCKET_MCQ]) == ["STEM-ALPHA", "b", "c"]
+    # Batch 2 is shown what batch 1 produced.
+    assert "STEM-ALPHA" in llm.prompts[1] and "STEM-ALPHA" not in llm.prompts[0]
+    # Fresh, unique ids although every batch numbered its questions q_001.
+    ids = [x["question_id"] for x in result["questions"][BUCKET_MCQ]]
+    assert len(set(ids)) == 3
+    # The final batch's blueprint is kept and its counted fields recomputed.
+    assert result["blueprint"]["title"] == "bp"
+    assert "3 question(s)" in result["blueprint"]["assessment_scope_summary"]
+    assert usage["total_token_count"] == 20 and usage["prompt_token_count"] == 14
+
+
+async def test_batched_run_cut_short_is_topped_up_and_top_up_writes_blueprint(monkeypatch, batch_size_two):
+    llm = UsageLLM([
+        _batch_response(["a", "b"], blueprint=False),
+        RuntimeError("batch 2 failed"),
+        _batch_response(["c"]),            # top-up call, marked final
+    ])
+    monkeypatch.setattr(gen, "call_llm", llm)
+
+    _, result, usage = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+
+    assert len(llm.prompts) == 3
+    assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b", "c"]
+    assert result["blueprint"]["title"] == "bp"
+    assert usage["total_token_count"] == 20  # the failed call reported nothing
+
+
+async def test_batched_run_with_no_blueprint_still_reports_counted_fields(monkeypatch, batch_size_two):
+    monkeypatch.setattr(gen, "TOPUP_MAX_ROUNDS", 0)
+    llm = UsageLLM([_batch_response(["a", "b"], blueprint=False), RuntimeError("batch 2 failed")])
+    monkeypatch.setattr(gen, "call_llm", llm)
+
+    _, result, _ = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+
+    assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b"]
+    assert "title" not in result["blueprint"]
+    assert "2 question(s)" in result["blueprint"]["assessment_scope_summary"]
+
+
+async def test_batched_run_where_every_batch_fails_raises(monkeypatch, batch_size_two):
+    monkeypatch.setattr(gen, "call_llm", UsageLLM([RuntimeError("down")]))
+    with pytest.raises(RuntimeError, match="Every question batch failed"):
+        await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+
+
+async def test_batched_run_survives_a_reconcile_failure(monkeypatch, batch_size_two):
+    llm = UsageLLM([_batch_response(["a", "b"], blueprint=False), _batch_response(["c", "d"])])
+    monkeypatch.setattr(gen, "call_llm", llm)
+
+    async def explode(*a, **k):
+        raise RuntimeError("reconcile bug")
+
+    monkeypatch.setattr(gen, "_reconcile_counts", explode)
+    _, result, _ = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+    # Returned as generated (4, one over the request) rather than failing the job.
+    assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b", "c", "d"]

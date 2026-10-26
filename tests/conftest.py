@@ -15,7 +15,7 @@ import types
 
 os.environ.update({
     "KARMAYOGI_API_KEY": "Bearer test-key",
-    "SUNBIRD_SSO_URL": "http://sso.test/",
+    "SUNBIRD_SSO_URL": "https://sso.test/",
     "SUNBIRD_SSO_REALM": "test-realm",
     "GOOGLE_APPLICATION_CREDENTIALS": "",
     "LANGFUSE_ENABLED": "false",
