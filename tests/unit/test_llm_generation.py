@@ -440,3 +440,28 @@ async def test_batched_run_survives_a_reconcile_failure(monkeypatch, batch_size_
     _, result, _ = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
     # Returned as generated (4, one over the request) rather than failing the job.
     assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b", "c", "d"]
+
+
+# --------------------------------------------------------------------------
+# _should_retry — which LLM errors call_llm retries
+# --------------------------------------------------------------------------
+
+def _retry_cases():
+    import asyncio
+
+    from google.genai.errors import ClientError, ServerError
+
+    return [
+        (ServerError(503, {"error": {"message": "unavailable"}}), True),
+        (asyncio.TimeoutError(), True),
+        (ClientError(429, {"error": {"message": "RESOURCE_EXHAUSTED"}}), True),
+        (ClientError(404, {"error": {"message": "Cached content not found"}}), True),
+        (ClientError(400, {"error": {"message": "Cache expired"}}), True),
+        (ClientError(400, {"error": {"message": "Invalid argument"}}), False),
+        (ValueError("bad"), False),
+    ]
+
+
+@pytest.mark.parametrize("error,expected", _retry_cases())
+def test_should_retry(error, expected):
+    assert gen._should_retry(error) is expected
