@@ -173,7 +173,7 @@ The 109 KCM competency definitions (~60k tokens) are uploaded to Gemini's contex
 | Code | Type | Notes |
 |---|---|---|
 | `mcq` | Multiple Choice | 4 options, one correct |
-| `ftb` | Fill in the Blank | Exact answer phrase |
+| `ftb` | Fill in the Blank | One blank, 4 options, 1 correct (legacy FTBs: exact answer phrase) |
 | `mtf` | Match the Following | Uses `matching_context` not `question_text` |
 | `multichoice` | Multiple Selection | Multiple correct options |
 | `truefalse` | True / False | Binary |
@@ -673,7 +673,7 @@ Per-type differences from the MCQ shape above:
 |---|---|---|
 | `Multiple Choice Question` | `"MCQ"` | `options[]` + `correct_option_index` (integer) |
 | `Multi-Choice Question` | `"MULTICHOICE"` | `options[]` + `correct_option_index` (**array** of integers) |
-| `FTB Question` | `"FTB"` | `correct_answer` (string); blanks appear as `___` in `question_text` |
+| `FTB Question` | `"FTB"` | `options` + `correct_option_index` (integer), exactly as MCQ; one blank as `___` in `question_text`. Legacy FTBs (stored before prompt version 6, no `options`) instead carry `correct_answer` (string) — check each FTB for `options` |
 | `MTF Question` | `"MTF"` | `matching_context` + `pairs[]` of `{left, right}` — **no `question_text`** |
 | `True/False Question` | `"TRUEFALSE"` | `correct_answer`, either `"True"` or `"False"` |
 

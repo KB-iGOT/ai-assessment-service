@@ -132,7 +132,7 @@ api_v1_router = APIRouter(prefix="/ai-assessments/v1", tags=["AI Assessments"])
 
 @api_v1_router.post("/generate")
 async def generate_v1(
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks,  # NOSONAR - FastAPI form endpoint: each parameter is a form field of the public API
     user_id: str = Depends(get_current_user), # AUTH REQUIREMENT
     course_ids: Optional[List[str]] = Form(None, description="List of Course IDs"),
     force: bool = Form(False),
@@ -157,7 +157,8 @@ async def generate_v1(
     competency_themes: Optional[List[str]] = Form(None, description="Competency themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     competency_sub_themes: Optional[List[str]] = Form(None, description="Competency sub-themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     additional_instructions: Optional[str] = Form(""),
-    files: Optional[List[UploadFile]] = File(None)
+    files: Optional[List[UploadFile]] = File(None, description="Supporting documents (.pdf, .docx). Always treated as document content."),
+    transcript_files: Optional[List[UploadFile]] = File(None, description="Transcripts (.vtt, .txt, .pdf, .docx). Always treated as transcript content.")
 ):
     """
     V2 Generation Endpoint:
@@ -170,12 +171,9 @@ async def generate_v1(
     """
     
     # --- 1. Validation & Logic Reuse (Same as V1) ---
-    valid_files = []
-    if files:
-        for f in files:
-            if not isinstance(f, str):
-                valid_files.append(f)
+    valid_files = [f for f in (files or []) if not isinstance(f, str)]
     files = valid_files
+    valid_transcripts = [f for f in (transcript_files or []) if not isinstance(f, str)]
 
     if topic_names in ["string", ""]: topic_names = None
     if blooms_config in ["string", ""]: blooms_config = None
@@ -200,7 +198,7 @@ async def generate_v1(
         if not competency_area or not parsed_competency_themes or not parsed_competency_sub_themes:
             raise HTTPException(status_code=400, detail="competency_area, competency_themes, and competency_sub_themes are required for competency assessment type.")
         # competency type can work purely from KCM descriptions — no course_ids or files required
-    elif not c_ids and not valid_files:
+    elif not c_ids and not valid_files and not valid_transcripts:
         raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
 
     valid_types = {t.value for t in QuestionType}
@@ -232,6 +230,17 @@ async def generate_v1(
     ]
     if files:
          param_list.extend([f.filename for f in valid_files])
+    # Prefixed so the same file uploaded as a transcript vs. a supporting
+    # document gets a different signature (it lands in a different prompt section).
+    param_list.extend([f"transcript:{f.filename}" for f in valid_transcripts])
+    # Competency assessments differ by area/themes/sub-themes alone, so those
+    # must be part of the signature or two different competency requests share
+    # a cache entry.
+    if assessment_type == AssessmentType.COMPETENCY:
+        param_list.extend([
+            str(competency_area), str(sorted(parsed_competency_themes)),
+            str(sorted(parsed_competency_sub_themes)),
+        ])
 
     param_str = "_".join(param_list)
     param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
@@ -323,12 +332,17 @@ async def generate_v1(
     logger.info(f"[{user_job_id}] Job created in DB with status PENDING")
 
     saved_files = []
-    if files:
+    saved_transcripts = []
+    if files or valid_transcripts:
         storage = get_storage_service()
         for file in files:
             stored_path, size = storage.save_file(file.file, file.filename, user_job_id)
             saved_files.append(stored_path)
             logger.info(f"[{user_job_id}] Uploaded file stored: {file.filename} ({size} bytes) → {stored_path}")
+        for file in valid_transcripts:
+            stored_path, size = storage.save_file(file.file, file.filename, user_job_id)
+            saved_transcripts.append(stored_path)
+            logger.info(f"[{user_job_id}] Uploaded transcript stored: {file.filename} ({size} bytes) → {stored_path}")
 
     # Construct Payload for Worker — full self-contained payload, no DB roundtrip needed
     worker_payload = {
@@ -337,6 +351,7 @@ async def generate_v1(
         "course_ids": c_ids,
         "course_names": parsed_course_names,
         "extra_files": [str(p) for p in saved_files],
+        "transcript_files": [str(p) for p in saved_transcripts],
         "assessment_type": assessment_type.value if hasattr(assessment_type, 'value') else assessment_type,
         "difficulty": difficulty.value if hasattr(difficulty, 'value') else difficulty,
         "total_questions": total_questions,
@@ -1059,9 +1074,14 @@ async def update_assessment_v1(
     except _Conflict as conflict:
         return _conflict_response(job_id, conflict.current_version)
 
-    normalized, events = diff_assessments(
-        row.get("assessment_data") or {}, payload.assessment_data, editor_id=user_id
-    )
+    try:
+        normalized, events = diff_assessments(
+            row.get("assessment_data") or {}, payload.assessment_data, editor_id=user_id
+        )
+    except ValidationError as exc:
+        logger.info(f"[{job_id}] Whole-blob update blocked by validation | "
+                    f"errors={[e['code'] for e in exc.errors][:10]}")
+        return _validation_response(exc.errors)
 
     # Validate the questions this save adds or changes. Untouched questions are
     # left alone so a pre-existing gap elsewhere in an older assessment cannot
@@ -1266,7 +1286,13 @@ def custom_openapi():
                     "type": "array",
                     "items": {"type": "string", "format": "binary"},
                     "title": "Files",
-                    "description": "Upload Files"
+                    "description": "Supporting documents (.pdf, .docx). Always treated as document content."
+                }
+                properties["transcript_files"] = {
+                    "type": "array",
+                    "items": {"type": "string", "format": "binary"},
+                    "title": "Transcript Files",
+                    "description": "Transcripts (.vtt, .txt, .pdf, .docx). Always treated as transcript content."
                 }
                 logger.info(f"Forced 'files' schema override for path: {path}")
     except Exception as e:

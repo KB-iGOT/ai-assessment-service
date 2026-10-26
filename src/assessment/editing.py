@@ -33,6 +33,7 @@ from .questions import (
     TYPE_KEY_BY_BUCKET,
     find_question,
     index_questions,
+    is_legacy_ftb,
     new_question_id,
     normalize_assessment,
     position_of,
@@ -46,6 +47,7 @@ from .validation import (
     SERVER_OWNED_FIELDS,
     ValidationError,
     classify_option_change,
+    editable_fields_for,
     get_path,
     set_path,
     validate_editable_fields,
@@ -216,7 +218,9 @@ def apply_question_edit(
     bucket, _, question = entry
     before = copy.deepcopy(question)
 
-    _raise_if_invalid(validate_editable_fields(bucket, updates))
+    # The stored question decides the allowlist, so a legacy FTB cannot be sent
+    # `options` and an option FTB cannot be sent a `correct_answer`.
+    _raise_if_invalid(validate_editable_fields(bucket, updates, question))
 
     # Build the diff first so a no-op save is distinguishable from a real one.
     changed_fields: List[Dict[str, Any]] = []
@@ -248,6 +252,12 @@ def apply_question_edit(
     # validating so `correct_option_index` is checked against final values.
     data = normalize_assessment(data, in_place=True)
     _, _, question = find_question(data, question_id)
+    # Emptying every option of an option FTB would otherwise turn it legacy.
+    if is_legacy_ftb(bucket, before) != is_legacy_ftb(bucket, question):
+        raise ValidationError([{
+            "code": "ftb_format_change_not_allowed",
+            "field": "options", "question_id": question_id,
+        }])
     edited_paths = {c["field"] for c in changed_fields}
     _raise_if_invalid(validate_question(
         bucket, question, enable_blooms=enable_blooms, edited_paths=edited_paths,
@@ -537,7 +547,8 @@ def diff_assessments(
     report the observable difference, so an edit that happens to restore a
     previous value is invisible to it.
 
-    Returns `(normalized_after, events)`.
+    Returns `(normalized_after, events)`. Raises `ValidationError` if the payload
+    changes an existing FTB between the legacy and option shapes.
     """
     old = normalize_assessment(before)
     new = normalize_assessment(after)
@@ -583,13 +594,26 @@ def diff_assessments(
         ))
 
     # Edited --------------------------------------------------------------
+    # The diff below only compares editable paths, so a payload that adds
+    # `options` to a legacy FTB (or strips them from an option FTB) would
+    # otherwise switch its shape unvalidated and unaudited.
+    shape_errors = [
+        {"code": "ftb_format_change_not_allowed", "field": "options", "question_id": qid}
+        for qid in new_order
+        if qid in old_index
+        and is_legacy_ftb(old_index[qid][0], old_index[qid][2])
+        != is_legacy_ftb(old_index[qid][0], new_index[qid][2])
+    ]
+    if shape_errors:
+        raise ValidationError(shape_errors)
+
     for qid in new_order:
         if qid not in old_index:
             continue
         bucket, _, old_question = old_index[qid]
         _, _, new_question = new_index[qid]
 
-        allowed = EDITABLE_FIELDS.get(bucket, set())
+        allowed = editable_fields_for(bucket, old_question)
         changed_fields = []
         for path in sorted(allowed):
             old_value = get_path(old_question, path)

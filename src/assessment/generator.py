@@ -7,10 +7,12 @@ import time
 import random
 import yaml
 import fitz  # PyMuPDF
+import docx  # python-docx
 import re
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, Optional, List, TypedDict
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ServerError, ClientError
@@ -20,10 +22,21 @@ from .config import (
     DATABASE_URL,
     GOOGLE_PROJECT_ID, GOOGLE_LOCATION, GENAI_MODEL_NAME,
     GOOGLE_APPLICATION_CREDENTIALS, PROMPT_VERSION, INTERACTIVE_COURSES_PATH,
-    QUESTION_BATCH_SIZE, BATCH_MAX_ATTEMPTS, ENABLE_QUESTION_BATCHING,
+    QUESTION_BATCH_SIZE, BATCH_MAX_ATTEMPTS, ENABLE_QUESTION_BATCHING, TOPUP_MAX_ROUNDS,
+    CASE_STUDY_MIN_LEVEL_PCT,
 )
 from .batching import Batch, apportion, merge_batches, plan_batches, summarize_for_dedup
-from .questions import BUCKET_BY_TYPE_KEY
+from .questions import new_question_id
+from .response_recovery import (
+    Buckets,
+    count_by_type,
+    extract_buckets,
+    remaining_blooms,
+    remaining_course_counts,
+    requested_counts,
+    shortfall,
+    trim_to_counts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,15 +253,15 @@ def format_previously_generated(digest: List[Dict[str, str]]) -> str:
         + "\n".join(lines)
         + "\n\n"
         "  - Every question you write MUST be distinct from all of the above in the\n"
-        "    CONCEPT it tests, not merely in wording. Duplicating, rephrasing, inverting, narrowing\n"
+        "    CONCEPT it tests, not merely in wording. Duplicating, duplicating verbatim, rephrasing, inverting, narrowing\n"
         "    or changing the question type of an existing question is a duplicate.\n"
         "  - A question is a duplicate if a person who knows the answer to one would\n"
-        "  have a meaningful advantage answering the other.\n"
+        "    have a meaningful advantage answering the other.\n"
         "  - Same concept at a different Bloom's level = duplicate.\n"
         "  - A genuinely broader or narrower knowledge domain at a different Bloom's\n"
         "    level = permitted.\n\n"
-        "  - This does NOT change your counts. Produce exactly the counts in section 9\n"
-        "    AND exactly the per-course quantities in section 13.\n"
+        "  - This does NOT change your counts. Produce exactly the counts in section 10\n"
+        "    AND exactly the per-course quantities in section 14.\n"
         "  - The course tag on each line above is there so you can avoid repeating a\n"
         "    concept — NOT as a signal that a course is 'done'. A course appearing\n"
         "    often above still receives its full quantity in this part. If avoiding a\n"
@@ -315,7 +328,7 @@ def build_course_distribution_instruction(
     Still says nothing about which specific question types come from which course
     — the cross product is left to the model. What it no longer leaves implicit is
     that the quota has to be spread across the types rather than parked in one of
-    them; that rule lives in section 13 of the template, which observed runs
+    them; that rule lives in section 14 of the template, which observed runs
     showed was being treated as advisory next to the per-type counts.
     """
     if course_counts:
@@ -405,39 +418,416 @@ def compute_blooms_by_type(
     return result
 
 
-async def generate_assessment(
+# Bloom's percentages used when Bloom's is enabled but no distribution was
+# supplied (PRD defaults by difficulty level).
+DEFAULT_BLOOMS_BY_DIFFICULTY: Dict[str, Dict[str, int]] = {
+    "beginner": {"Remember": 40, "Understand": 40, "Apply": 20},
+    "intermediate": {"Remember": 20, "Understand": 30, "Apply": 30, "Analyze": 20},
+    "advanced": {"Apply": 20, "Analyze": 40, "Evaluate": 30, "Create": 10},
+}
+DEFAULT_BLOOMS_FALLBACK: Dict[str, int] = {
+    "Remember": 20, "Understand": 25, "Apply": 25, "Analyze": 20, "Evaluate": 10,
+}
+
+CASE_STUDY_BLOOMS = ["Apply", "Analyze", "Evaluate", "Create"]
+
+
+def case_study_levels(
+    level_weights: Dict[str, float],
+    difficulty_level: Optional[str],
+) -> List[str]:
+    """
+    The higher-order Bloom's levels the prompt offers as eligible for case studies.
+
+    `level_weights` must describe the WHOLE assessment — question counts from
+    `compute_blooms_by_type`, or the default percentages — never one batch's
+    slice. Slices are shuffled runs of the assignment, so a level at 5% overall
+    can look like 25% inside a small batch; deciding once, here, gives every
+    batch and top-up call the same answer.
+
+    A level qualifies at CASE_STUDY_MIN_LEVEL_PCT or more of the total. Beginner
+    gets none: its difficulty rule limits any scenario to 2-3 sentences. This
+    only decides which levels MAY carry a case study — whether any question does
+    is left to the model.
+    """
+    if (difficulty_level or "").lower() == "beginner":
+        return []
+    total = sum(level_weights.values())
+    if total <= 0:
+        return []
+    return [
+        level for level in CASE_STUDY_BLOOMS
+        if level_weights.get(level, 0) * 100 / total >= CASE_STUDY_MIN_LEVEL_PCT
+    ]
+
+
+def _split_names(value: Any) -> List[str]:
+    """A list as given, or a comma-separated string split into stripped names."""
+    if isinstance(value, list):
+        return value
+    if not value:
+        return []
+    return [name.strip() for name in value.split(",") if name.strip()]
+
+
+def _read_course_metadata(c_path: Path) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+    """A course folder's metadata.json and the learning objectives it lists."""
+    meta_path = c_path / "metadata.json"
+    if not meta_path.exists():
+        return None, []
+    meta = json.loads(meta_path.read_text(encoding='utf-8'))
+
+    # Extract Learning Objectives from the newly formatted instructions array
+    instructions = meta.get("instructions", [])
+    if isinstance(instructions, list):
+        return meta, list(instructions)
+    if isinstance(instructions, str) and instructions.strip():
+        # Fallback just in case some legacy string instructions slipped through
+        return meta, [instructions]
+    return meta, []
+
+
+async def _collect_course_files(
+    c_path: Path,
+    cid: str,
+    pattern: str,
+    extractor,
+    label: str,
+    seen_content_hashes: set,
+) -> Tuple[List[str], bool]:
+    """
+    The text of every `pattern` file under one course folder (recursive), one
+    section per file. Empty files and content already seen — in this course or
+    an earlier one, as a VTT or a PDF — are skipped.
+
+    Returns the sections and whether any file contributed.
+    """
+    sections: List[str] = []
+    found = False
+    for path in c_path.rglob(pattern):
+        try:
+            text = await extractor(path)
+            if not text:
+                continue
+
+            # Deduplication Check
+            text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
+            if text_hash in seen_content_hashes:
+                logger.info(f"Skipping duplicate {label} content: {path.name}")
+                continue
+            seen_content_hashes.add(text_hash)
+
+            rel_path = path.relative_to(c_path)
+            sections.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
+            found = True
+        except Exception as e:
+            logger.warning(f"Failed to read {label} {path}: {e}")
+    return sections, found
+
+
+async def _aggregate_course_content(
+    course_ids: List[str],
+    course_names: Optional[List[str]],
+    aggregated_metadata: Dict[str, Any],
+) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Read every course folder: its metadata, learning objectives, transcripts
+    and PDFs. Course metadata and per-course content availability are recorded
+    on `aggregated_metadata`.
+
+    Returns (transcript sections, PDF sections, learning objectives).
+    """
+    base_path = Path(INTERACTIVE_COURSES_PATH)
+    transcripts: List[str] = []
+    pdfs: List[str] = []
+    learning_objectives: List[str] = []
+
+    # Deduplication Set (to prevent double-handling of leaf vs root downloads)
+    seen_content_hashes: set = set()
+
+    for idx, cid in enumerate(course_ids):
+        c_path = base_path / cid
+        if not c_path.exists():
+            logger.warning(f"Course folder {cid} not found, skipping.")
+            # If caller supplied a course name, inject it so LLM never outputs N/A
+            fallback_name = (course_names or [])[idx] if course_names and idx < len(course_names) else None
+            if fallback_name:
+                aggregated_metadata["courses"].append({"name": fallback_name, "identifier": cid})
+                logger.info(f"Injected fallback course name '{fallback_name}' for {cid}")
+            continue
+
+        meta, course_objectives = _read_course_metadata(c_path)
+        if meta is not None:
+            aggregated_metadata["courses"].append(meta)
+            learning_objectives.extend(course_objectives)
+
+        # Transcript (Recursive - find all english_subtitles.vtt in subfolders)
+        vtt_sections, vtt_found = await _collect_course_files(
+            c_path, cid, "english_subtitles.vtt", extract_vtt_text, "VTT", seen_content_hashes,
+        )
+        # PDFs (Recursive - find all PDFs in subfolders)
+        pdf_sections, pdf_found = await _collect_course_files(
+            c_path, cid, "*.pdf", extract_pdf_text, "PDF", seen_content_hashes,
+        )
+        transcripts.extend(vtt_sections)
+        pdfs.extend(pdf_sections)
+
+        aggregated_metadata["content_availability"][cid] = {
+            "has_vtt": vtt_found,
+            "has_pdf": pdf_found,
+        }
+
+    return transcripts, pdfs, learning_objectives
+
+
+def _competency_only_context(
+    competency_area: str,
+    competency_themes: Any,
+    competency_sub_themes: Any,
+) -> Tuple[Optional[str], Dict[str, str]]:
+    """
+    Context for a competency assessment with no course content: the KCM
+    descriptions matching the requested themes / sub-themes, and the course
+    entry that stands in for a real course.
+
+    Returns (KCM transcript section or None when nothing matched, course entry).
+    """
+    themes_list = _split_names(competency_themes)
+    sub_themes_list = _split_names(competency_sub_themes)
+    matched = [
+        entry for entry in KCM_DESCRIPTIONS_FILE
+        if (
+            entry.get("Area", "").lower() in [t.lower() for t in themes_list] or
+            entry.get("Label", "").lower() in [s.lower() for s in sub_themes_list]
+        )
+    ]
+    kcm_section = None
+    if matched:
+        kcm_content = "\n\n".join([
+            f"Sub-Theme: {e.get('Label')}\nArea: {e.get('Area')}\nDescription: {e.get('Description')}\nLevels: {json.dumps(e.get('Levels', {}))}"
+            for e in matched
+        ])
+        kcm_section = f"--- KCM COMPETENCY REFERENCE ---\n{kcm_content}"
+        logger.info(f"Competency-only mode: injected {len(matched)} KCM entries for area='{competency_area}' themes={themes_list} sub_themes={sub_themes_list}")
+    course = {
+        "name": f"Competency Assessment — {competency_area}",
+        "code": "KCM_COMPETENCY",
+        "description": f"Assessment generated from KCM competency framework. Area: {competency_area}, Themes: {', '.join(themes_list)}, Sub-Themes: {', '.join(sub_themes_list)}"
+    }
+    return kcm_section, course
+
+
+async def _collect_uploads(
+    extra_files: Optional[List[Path]],
+    transcript_files: Optional[List[Path]],
+) -> Tuple[List[str], List[str], Dict[str, bool]]:
+    """
+    Text of the files uploaded through the API. The field decides the prompt
+    section, the extension only decides how text is extracted:
+    `transcript_files` go to TRANSCRIPTS, `extra_files` (supporting documents)
+    to document content.
+
+    Returns (transcript sections, document sections, content availability).
+    """
+    transcripts: List[str] = []
+    documents: List[str] = []
+    uploads = [(p, True) for p in (transcript_files or [])] + [
+        (p, False) for p in (extra_files or [])
+    ]
+    for fpath, is_transcript in uploads:
+        text = await extract_uploaded_text(fpath)
+        if not text:
+            logger.warning(f"No text extracted from uploaded file {fpath.name} — it will not contribute to the prompt")
+            continue
+        if is_transcript:
+            transcripts.append(f"--- UPLOADED TRANSCRIPT: {fpath.name} ---\n{text}")
+        else:
+            documents.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
+    # Key names kept for API compatibility: has_vtt = transcript content,
+    # has_pdf = supporting-document content (any accepted format).
+    availability = {"has_vtt": bool(transcripts), "has_pdf": bool(documents)}
+    return transcripts, documents, availability
+
+
+def _format_learning_objectives(learning_objectives: List[str]) -> str:
+    """Learning objectives as a readable list for the prompt."""
+    if not learning_objectives:
+        return "None explicitly provided. Synthesize appropriate Learning Objectives based on the course content."
+    # Deduplicate LOs just in case multiple modules had the exact same strings
+    unique_los = list(dict.fromkeys(learning_objectives))
+    return "\n".join([f"- {lo}" for lo in unique_los])
+
+
+def _blooms_inputs(
+    enable_blooms: bool,
+    blooms_distribution: Optional[Dict[str, int]],
+    difficulty_level: Optional[str],
+    question_type_counts: Optional[Dict[str, int]],
+) -> Tuple[Dict[str, List[str]], Dict[str, float], str]:
+    """
+    The Bloom's inputs for the prompt.
+
+    Returns:
+      * `blooms_by_type` — the per-type assignment. The batched path slices it
+        per batch; it stays empty on the two branches that have no per-type
+        assignment to slice (disabled, and percentage defaults).
+      * `blooms_weights` — the whole assessment's mix, for `case_study_levels`.
+      * the formatted string the prompt renders.
+    """
+    if not enable_blooms:
+        return {}, {}, "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
+
+    if not blooms_distribution:
+        # Dynamic defaults based on Difficulty Level (PRD Requirement)
+        blooms_weights = DEFAULT_BLOOMS_BY_DIFFICULTY.get(
+            (difficulty_level or "").lower(), DEFAULT_BLOOMS_FALLBACK,
+        )
+        blooms_str = ", ".join(f"{level}: {pct}%" for level, pct in blooms_weights.items())
+        return {}, blooms_weights, blooms_str
+
+    # Distribute bloom levels per question type so the LLM gets unambiguous assignments.
+    # A flat numbered list is unreliable because the LLM writes questions grouped by type,
+    # not as a flat sequence — it cannot map "Question N" to the right type bucket.
+    blooms_by_type = compute_blooms_by_type(blooms_distribution, question_type_counts or {})
+    blooms_str = format_blooms_by_type(blooms_by_type)
+    blooms_weights = Counter(level for levels in blooms_by_type.values() for level in levels)
+    logger.info(f"Blooms by type: { {k: v for k, v in blooms_by_type.items()} }")
+    return blooms_by_type, blooms_weights, blooms_str
+
+
+def _competency_focus_instruction(
+    assessment_type: str,
+    competency_area: Optional[str],
+    competency_themes: Any,
+    competency_sub_themes: Any,
+) -> str:
+    """The competency focus instruction; only a competency assessment gets one."""
+    if not (assessment_type == "competency" and competency_area):
+        return "Not applicable for this assessment type."
+    themes_list = _split_names(competency_themes)
+    sub_themes_list = _split_names(competency_sub_themes)
+    return (
+        f"Competency Area: {competency_area}\n"
+        f"Competency Themes: {', '.join(themes_list)}\n"
+        f"Competency Sub-Themes: {', '.join(sub_themes_list)}\n"
+        f"ALL questions MUST map to one of the above sub-themes. No other competencies are permitted."
+    )
+
+
+async def _reconcile_single_call(
+    result_json: Any,
+    usage: Dict[str, Any],
+    *,
     question_type_counts: Dict[str, int],
-    course_folder: Optional[Path] = None, # Deprecated in v3.2, kept for backward compat
-    assessment_type: str = "final",
-    difficulty_level: str = "Intermediate",
-    total_questions: int = 5,
-    time_to_complete: Optional[str] = None,
-    additional_instructions: Optional[str] = None,
-    input_language: str = "English",
-    course_ids: List[str] = None,
-    topic_names: Optional[List[str]] = None,
-    blooms_distribution: Optional[Dict[str, int]] = None,
-    enable_blooms: bool = True,
-    course_weightage: Optional[str] = None,
-    time_limit: Optional[int] = None,
-    extra_files: Optional[List[Path]] = None,
-    competency_area: Optional[str] = None,
-    competency_themes: Optional[str] = None,
-    competency_sub_themes: Optional[str] = None,
-    course_names: Optional[List[str]] = None,
-) -> Tuple[Dict, Dict, Dict]:
+    requested_total: int,
+    blooms_by_type: Dict[str, List[str]],
+    blooms_str: str,
+    course_weightage: Optional[Any],
+    aggregated_metadata: Dict[str, Any],
+    shared_prompt_inputs: Dict[str, Any],
+    time_limit: Optional[int],
+    job_id: str,
+) -> Tuple[Any, Dict[str, Any]]:
+    """
+    Bring a single-call response's per-type counts to the request. A response
+    whose counts already match is returned exactly as the model wrote it.
+    Nothing here may fail the job: on any error the response is returned as
+    generated, exactly as before this step existed.
+    """
+    try:
+        blueprint = result_json.get("blueprint") if isinstance(result_json, dict) else None
+        reconciled = await _reconcile_counts(
+            extract_buckets(result_json),
+            blueprint if isinstance(blueprint, dict) else {},
+            question_type_counts=question_type_counts,
+            requested_total=requested_total,
+            blooms_by_type=blooms_by_type,
+            blooms_str=blooms_str,
+            course_weightage=course_weightage,
+            aggregated_metadata=aggregated_metadata,
+            shared_prompt_inputs=shared_prompt_inputs,
+            job_id=job_id,
+        )
+        if reconciled:
+            questions, blueprint, topup_usages = reconciled
+            # The model's blueprint tallied the questions it wrote, not the
+            # set kept, so its counted fields are recounted — as the batched
+            # path always does.
+            reconciled_json = dict(result_json) if isinstance(result_json, dict) else {}
+            reconciled_json["questions"] = questions
+            reconciled_json["blueprint"] = _recount_generated_fields(
+                blueprint, questions,
+                assessment_type=shared_prompt_inputs.get("assessment_type"),
+                difficulty_level=shared_prompt_inputs.get("difficulty_level"),
+                input_language=shared_prompt_inputs.get("input_language"),
+                aggregated_metadata=aggregated_metadata,
+                time_limit=time_limit,
+            )
+            reconciled_usage = _merge_usage([usage] + topup_usages) if topup_usages else usage
+            return reconciled_json, reconciled_usage
+    except Exception:
+        logger.exception(
+            f"[{job_id}] Count reconciliation failed — returning the "
+            f"response as generated"
+        )
+    return result_json, usage
+
+
+@dataclass
+class GenerationRequest:
+    """Everything one `generate_assessment` call needs, as sent by the worker."""
+
+    question_type_counts: Dict[str, int]
+    course_folder: Optional[Path] = None  # Deprecated in v3.2, kept for backward compat
+    assessment_type: str = "final"
+    difficulty_level: str = "Intermediate"
+    total_questions: int = 5
+    time_to_complete: Optional[str] = None
+    additional_instructions: Optional[str] = None
+    input_language: str = "English"
+    course_ids: Optional[List[str]] = None
+    topic_names: Optional[List[str]] = None
+    blooms_distribution: Optional[Dict[str, int]] = None
+    enable_blooms: bool = True
+    course_weightage: Optional[str] = None
+    time_limit: Optional[int] = None
+    extra_files: Optional[List[Path]] = None
+    transcript_files: Optional[List[Path]] = None
+    competency_area: Optional[str] = None
+    competency_themes: Optional[str] = None
+    competency_sub_themes: Optional[str] = None
+    course_names: Optional[List[str]] = None
+
+
+async def generate_assessment(request: GenerationRequest) -> Tuple[Dict, Dict, Dict]:
     """
     Generates assessment for one or multiple courses.
     Returns (aggregated_metadata, assessment_json, usage_metadata)
     """
+    question_type_counts = request.question_type_counts
+    course_folder = request.course_folder
+    assessment_type = request.assessment_type
+    difficulty_level = request.difficulty_level
+    total_questions = request.total_questions
+    additional_instructions = request.additional_instructions
+    input_language = request.input_language
+    course_ids = request.course_ids
+    topic_names = request.topic_names
+    blooms_distribution = request.blooms_distribution
+    enable_blooms = request.enable_blooms
+    course_weightage = request.course_weightage
+    time_limit = request.time_limit
+    extra_files = request.extra_files
+    transcript_files = request.transcript_files
+    competency_area = request.competency_area
+    competency_themes = request.competency_themes
+    competency_sub_themes = request.competency_sub_themes
+    course_names = request.course_names
+
     # Normalize inputs
     if not course_ids and course_folder:
         course_ids = [course_folder.name]
-    
-    # Normalize inputs
-    if not course_ids and course_folder:
-        course_ids = [course_folder.name]
-    
+
     # if not course_ids:
     #     raise ValueError("No course_ids provided.")
 
@@ -447,179 +837,55 @@ async def generate_assessment(
         composite_id = f"comprehensive_{'_'.join(sorted_ids)}" if len(sorted_ids) > 1 else sorted_ids[0]
     else:
         composite_id = "custom_content_generation"
-    
-    base_path = Path(INTERACTIVE_COURSES_PATH)
-    
+
     logger.info(f"Generating assessment for {composite_id} (Type: {assessment_type})")
 
-    # 1. Aggregate Content from All Courses
+    # 1. Aggregate Content — from the course folders, or the KCM descriptions
+    #    for a competency assessment, or nothing but the uploaded files.
     aggregated_metadata = {"courses": [], "content_availability": {}}
-    combined_transcript = []
-    combined_pdfs = []
-    
-    # Aggregate Learning Objectives specifically
-    combined_learning_objectives = []
-    
-    # Deduplication Set (to prevent double-handling of leaf vs root downloads)
-    seen_content_hashes = set()
+    combined_transcript: List[str] = []
+    combined_pdfs: List[str] = []
+    combined_learning_objectives: List[str] = []
 
     if course_ids:
-        for idx, cid in enumerate(course_ids):
-            c_path = base_path / cid
-            if not c_path.exists():
-                logger.warning(f"Course folder {cid} not found, skipping.")
-                # If caller supplied a course name, inject it so LLM never outputs N/A
-                fallback_name = (course_names or [])[idx] if course_names and idx < len(course_names) else None
-                if fallback_name:
-                    aggregated_metadata["courses"].append({"name": fallback_name, "identifier": cid})
-                    logger.info(f"Injected fallback course name '{fallback_name}' for {cid}")
-                continue
-                
-            # Metadata
-            meta_path = c_path / "metadata.json"
-            if meta_path.exists():
-                meta = json.loads(meta_path.read_text(encoding='utf-8'))
-                aggregated_metadata["courses"].append(meta)
-                
-                # Extract Learning Objectives from the newly formatted instructions array
-                instructions = meta.get("instructions", [])
-                if isinstance(instructions, list):
-                    combined_learning_objectives.extend(instructions)
-                elif isinstance(instructions, str) and instructions.strip():
-                     # Fallback just in case some legacy string instructions slipped through
-                     combined_learning_objectives.append(instructions)
-                
-            # Transcript (Recursive - find all english_subtitles.vtt in subfolders)
-            vtt_found = False
-            for vtt_path in c_path.rglob("english_subtitles.vtt"):
-                 try:
-                     text = await extract_vtt_text(vtt_path)
-                     if not text: continue
-
-                     # Deduplication Check
-                     text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
-                     if text_hash in seen_content_hashes:
-                         logger.info(f"Skipping duplicate VTT content: {vtt_path.name}")
-                         continue
-                     seen_content_hashes.add(text_hash)
-
-                     rel_path = vtt_path.relative_to(c_path)
-                     combined_transcript.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
-                     vtt_found = True
-                 except Exception as e:
-                     logger.warning(f"Failed to read VTT {vtt_path}: {e}")
-
-            # PDFs (Recursive - find all PDFs in subfolders)
-            pdf_found = False
-            for pdf_file in c_path.rglob("*.pdf"):
-                 try:
-                    text = await extract_pdf_text(pdf_file)
-                    if not text: continue
-
-                    # Deduplication Check
-                    text_hash = hashlib.md5(text.encode('utf-8')).hexdigest()
-                    if text_hash in seen_content_hashes:
-                        logger.info(f"Skipping duplicate PDF content: {pdf_file.name}")
-                        continue
-                    seen_content_hashes.add(text_hash)
-
-                    rel_path = pdf_file.relative_to(c_path)
-                    combined_pdfs.append(f"--- SOURCE: {cid} / {rel_path} ---\n{text}")
-                    pdf_found = True
-                 except Exception as e:
-                     logger.warning(f"Failed to read PDF {pdf_file}: {e}")
-
-            aggregated_metadata["content_availability"][cid] = {
-                "has_vtt": vtt_found,
-                "has_pdf": pdf_found,
-            }
+        combined_transcript, combined_pdfs, combined_learning_objectives = (
+            await _aggregate_course_content(course_ids, course_names, aggregated_metadata)
+        )
+    elif assessment_type == "competency" and competency_area:
+        kcm_section, course = _competency_only_context(
+            competency_area, competency_themes, competency_sub_themes,
+        )
+        if kcm_section:
+            combined_transcript.append(kcm_section)
+        aggregated_metadata["courses"].append(course)
     else:
-        if assessment_type == "competency" and competency_area:
-            # No course content — build context from KCM descriptions matching the requested area/themes/sub-themes
-            themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
-            sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
-            matched = [
-                entry for entry in KCM_DESCRIPTIONS_FILE
-                if (
-                    entry.get("Area", "").lower() in [t.lower() for t in themes_list] or
-                    entry.get("Label", "").lower() in [s.lower() for s in sub_themes_list]
-                )
-            ]
-            if matched:
-                kcm_content = "\n\n".join([
-                    f"Sub-Theme: {e.get('Label')}\nArea: {e.get('Area')}\nDescription: {e.get('Description')}\nLevels: {json.dumps(e.get('Levels', {}))}"
-                    for e in matched
-                ])
-                combined_transcript.append(f"--- KCM COMPETENCY REFERENCE ---\n{kcm_content}")
-                logger.info(f"Competency-only mode: injected {len(matched)} KCM entries for area='{competency_area}' themes={themes_list} sub_themes={sub_themes_list}")
-            aggregated_metadata["courses"].append({
-                "name": f"Competency Assessment — {competency_area}",
-                "code": "KCM_COMPETENCY",
-                "description": f"Assessment generated from KCM competency framework. Area: {competency_area}, Themes: {', '.join(themes_list)}, Sub-Themes: {', '.join(sub_themes_list)}"
-            })
-        else:
-            # Dummy Metadata for Custom Uploads
-            aggregated_metadata["courses"].append({
-                "name": "User Uploaded Content",
-                "code": "CUSTOM_UPLOAD",
-                "description": "Assessment generated from user provided files (PDF/VTT)."
-            })
+        # Dummy Metadata for Custom Uploads
+        aggregated_metadata["courses"].append({
+            "name": "User Uploaded Content",
+            "code": "CUSTOM_UPLOAD",
+            "description": "Assessment generated from user provided files (transcripts/documents)."
+        })
 
-    # Process Extra Uploaded Files (from API)
-    if extra_files:
-        uploaded_vtt = False
-        uploaded_pdf = False
-        for fpath in extra_files:
-            if fpath.suffix.lower() == '.pdf':
-                text = await extract_pdf_text(fpath)
-                if text:
-                    combined_pdfs.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
-                    uploaded_pdf = True
-            elif fpath.suffix.lower() == '.vtt':
-                text = await extract_vtt_text(fpath)
-                if text:
-                    combined_transcript.append(f"--- UPLOADED FILE: {fpath.name} ---\n{text}")
-                    uploaded_vtt = True
-        aggregated_metadata["content_availability"]["uploaded_files"] = {
-            "has_vtt": uploaded_vtt,
-            "has_pdf": uploaded_pdf,
-        }
+    # Process Uploaded Files (from API).
+    if extra_files or transcript_files:
+        uploaded_transcripts, uploaded_docs, availability = await _collect_uploads(
+            extra_files, transcript_files,
+        )
+        combined_transcript.extend(uploaded_transcripts)
+        combined_pdfs.extend(uploaded_docs)
+        aggregated_metadata["content_availability"]["uploaded_files"] = availability
 
     final_transcript_str = "\n\n".join(combined_transcript) if combined_transcript else "N/A"
     final_pdf_str = "\n\n".join(combined_pdfs) if combined_pdfs else "N/A"
-    
-    # Format Learning Objectives into a nice readable list for the prompt
-    if not combined_learning_objectives:
-        final_lo_str = "None explicitly provided. Synthesize appropriate Learning Objectives based on the course content."
-    else:
-        # Deduplicate LOs just in case multiple modules had the exact same strings
-        unique_los = list(dict.fromkeys(combined_learning_objectives))
-        final_lo_str = "\n".join([f"- {lo}" for lo in unique_los])
-    
+    final_lo_str = _format_learning_objectives(combined_learning_objectives)
+
     # 2. Format Bloom's Distribution
-    #    `blooms_by_type` is kept alongside the formatted string: the batched path
-    #    slices it per batch, and it stays empty on the two branches that have no
-    #    per-type assignment to slice (disabled, and percentage defaults).
-    blooms_by_type: Dict[str, List[str]] = {}
-    if not enable_blooms:
-        blooms_str = "Strictly Disabled - Do NOT force any specific Bloom's taxonomy mapping. Rely entirely on the requested difficulty level."
-    elif not blooms_distribution:
-        # Dynamic defaults based on Difficulty Level (PRD Requirement)
-        if difficulty_level.lower() == "beginner":
-            blooms_str = "Remember: 40%, Understand: 40%, Apply: 20%"
-        elif difficulty_level.lower() == "intermediate":
-            blooms_str = "Remember: 20%, Understand: 30%, Apply: 30%, Analyze: 20%"
-        elif difficulty_level.lower() == "advanced":
-             blooms_str = "Apply: 20%, Analyze: 40%, Evaluate: 30%, Create: 10%"
-        else:
-            blooms_str = "Remember: 20%, Understand: 25%, Apply: 25%, Analyze: 20%, Evaluate: 10%"
-    else:
-        # Distribute bloom levels per question type so the LLM gets unambiguous assignments.
-        # A flat numbered list is unreliable because the LLM writes questions grouped by type,
-        # not as a flat sequence — it cannot map "Question N" to the right type bucket.
-        blooms_by_type = compute_blooms_by_type(blooms_distribution, question_type_counts or {})
-        blooms_str = format_blooms_by_type(blooms_by_type)
-        logger.info(f"Blooms by type: { {k: v for k, v in blooms_by_type.items()} }")
+    blooms_by_type, blooms_weights, blooms_str = _blooms_inputs(
+        enable_blooms, blooms_distribution, difficulty_level, question_type_counts,
+    )
+
+    eligible_case_study_levels = case_study_levels(blooms_weights, difficulty_level)
+    logger.info(f"Case study eligible levels: {eligible_case_study_levels or 'None'}")
 
     # 3. Format Topics
     topics_str = ", ".join(topic_names) if topic_names else "None specific (Cover all modules)"
@@ -628,16 +894,9 @@ async def generate_assessment(
     course_weightage_instruction = build_course_distribution_instruction(course_weightage)
 
     # Build competency focus instruction for competency assessment type
-    competency_focus_instruction = "Not applicable for this assessment type."
-    if assessment_type == "competency" and competency_area:
-        themes_list = competency_themes if isinstance(competency_themes, list) else ([t.strip() for t in competency_themes.split(",") if t.strip()] if competency_themes else [])
-        sub_themes_list = competency_sub_themes if isinstance(competency_sub_themes, list) else ([s.strip() for s in competency_sub_themes.split(",") if s.strip()] if competency_sub_themes else [])
-        competency_focus_instruction = (
-            f"Competency Area: {competency_area}\n"
-            f"Competency Themes: {', '.join(themes_list)}\n"
-            f"Competency Sub-Themes: {', '.join(sub_themes_list)}\n"
-            f"ALL questions MUST map to one of the above sub-themes. No other competencies are permitted."
-        )
+    competency_focus_instruction = _competency_focus_instruction(
+        assessment_type, competency_area, competency_themes, competency_sub_themes,
+    )
 
     # 5. Choose the generation path.
     #    The per-type counts are what actually gets generated, so they — not
@@ -658,27 +917,10 @@ async def generate_assessment(
         input_language=input_language,
         topic_names=topics_str,
         competency_focus_instruction=competency_focus_instruction,
+        case_study_levels=", ".join(eligible_case_study_levels) or "None",
     )
 
-    if not use_batching:
-        # ---- Single-call path (unchanged) ----
-        prompt = build_prompt(
-            question_type_counts=question_type_counts,
-            total_questions=total_questions,
-            blooms_distribution=blooms_str,
-            course_weightage_instruction=course_weightage_instruction,
-            **shared_prompt_inputs,
-        )
-
-        # 6. Call LLM
-        response_text, usage = await call_llm(prompt)
-
-        try:
-            result_json = json.loads(response_text)
-        except json.JSONDecodeError:
-            logger.error("Failed to parse LLM response as JSON")
-            raise ValueError("LLM response was not valid JSON")
-    else:
+    if use_batching:
         # ---- Batched path ----
         result_json, usage = await _generate_in_batches(
             question_type_counts=question_type_counts,
@@ -691,8 +933,42 @@ async def generate_assessment(
             time_limit=time_limit,
             job_id=composite_id,
         )
+        return aggregated_metadata, result_json, usage
+
+    # ---- Single-call path (unchanged) ----
+    prompt = build_prompt(
+        shared_prompt_inputs,
+        question_type_counts=question_type_counts,
+        total_questions=total_questions,
+        blooms_distribution=blooms_str,
+        course_weightage_instruction=course_weightage_instruction,
+    )
+
+    # 6. Call LLM
+    response_text, usage = await call_llm(prompt)
+
+    try:
+        result_json = json.loads(response_text)
+    except json.JSONDecodeError:
+        logger.error("Failed to parse LLM response as JSON")
+        raise ValueError("LLM response was not valid JSON")
+
+    # 7. Bring the per-type counts to the request.
+    result_json, usage = await _reconcile_single_call(
+        result_json, usage,
+        question_type_counts=question_type_counts,
+        requested_total=requested_total,
+        blooms_by_type=blooms_by_type,
+        blooms_str=blooms_str,
+        course_weightage=course_weightage,
+        aggregated_metadata=aggregated_metadata,
+        shared_prompt_inputs=shared_prompt_inputs,
+        time_limit=time_limit,
+        job_id=composite_id,
+    )
 
     return aggregated_metadata, result_json, usage
+
 
 async def _generate_in_batches(
     *,
@@ -740,95 +1016,58 @@ async def _generate_in_batches(
             + (f" | courses {batch.course_counts}" if batch.course_counts else "")
         )
 
-    digest: List[Dict[str, str]] = []
-    payloads: List[Any] = []
-    usages: List[Any] = []
-
-    # Section 10 asks the model to set question depth against the time available.
-    # The limit is the whole assessment's but a batch holds a slice, so left as-is
-    # a 25-question batch divides the whole budget by its own volume and reads a
-    # per-question allowance several times larger than the real one.
-    batch_prompt_inputs = dict(shared_prompt_inputs)
-    batch_prompt_inputs["time_to_complete"] = _format_batch_time_limit(
-        shared_prompt_inputs.get("time_to_complete"), requested_total,
+    payloads, usages = await _run_batches(
+        batches,
+        digest=[],
+        question_type_counts=question_type_counts,
+        requested_total=requested_total,
+        blooms_str=blooms_str,
+        course_weightage=course_weightage,
+        batch_prompt_inputs=_batch_prompt_inputs(shared_prompt_inputs, requested_total),
+        job_id=job_id,
     )
-
-    for batch in batches:
-        prompt = build_prompt(
-            question_type_counts=batch.type_counts,
-            total_questions=batch.total,
-            blooms_distribution=(
-                format_blooms_by_type(batch.blooms_by_type)
-                if batch.blooms_by_type else blooms_str
-            ),
-            course_weightage_instruction=build_course_distribution_instruction(
-                course_weightage, batch.course_counts or None,
-            ),
-            total_questions_text=(
-                _format_final_batch_total(batch, requested_total, question_type_counts)
-                if batch.is_final else None
-            ),
-            blueprint_section=None if batch.is_final else "",
-            output_format_section=(
-                None if batch.is_final
-                else ASSESSMENT_PROMPTS.get("output_format_section_batch", "")
-            ),
-            previously_generated=format_previously_generated(digest),
-            **batch_prompt_inputs,
-        )
-        schema = ASSESSMENT_SCHEMA if batch.is_final else schema_without_blueprint()
-
-        try:
-            payload, usage = await _generate_question_batch(
-                prompt=prompt, schema=schema, batch=batch, job_id=job_id,
-            )
-        except Exception as exc:  # noqa: BLE001 — already retried inside
-            # Stop rather than skip ahead. A later batch is written against the
-            # list of what came before, so generating past a hole gives every
-            # remaining call an incomplete picture — and each one costs minutes
-            # on a job already known to come up short.
-            logger.error(
-                f"[{job_id}] {batch.describe()} failed after retries — keeping the "
-                f"{len(payloads)} batch(es) already generated | {exc}"
-            )
-            break
-
-        payloads.append(payload)
-        usages.append(usage)
-        digest.extend(summarize_for_dedup(payload))
-        logger.info(
-            f"[{job_id}] {batch.describe()} complete | "
-            f"{len(digest)}/{requested_total} questions so far"
-        )
 
     if not payloads:
         raise RuntimeError(f"Every question batch failed for job {job_id}")
 
     merged_questions = merge_batches(payloads)
 
-    produced = sum(len(v) for v in merged_questions.values())
-    if produced != requested_total:
-        # Either a batch was abandoned above, or one returned fewer questions than
-        # it was told to. Surfaced rather than repaired — a corrective pass is a
-        # separate decision, and the counts are what the caller asked for.
-        shortfall: Dict[str, int] = {}
-        for type_key, bucket in BUCKET_BY_TYPE_KEY.items():
-            asked = int((question_type_counts or {}).get(type_key) or 0)
-            missing = asked - len(merged_questions.get(bucket, []))
-            if asked and missing:
-                shortfall[type_key] = missing
-        logger.warning(
-            f"[{job_id}] Batched generation produced {produced} questions, "
-            f"{requested_total} were requested. Shortfall by type: "
-            f"{shortfall or 'none — a batch returned an unrequested type'}"
-        )
-
     # The last batch to SUCCEED carries the blueprint. When the run was cut short
-    # that batch was not the final one and has none, so the blueprint is empty and
-    # `_recount_generated_fields` fills in what can be counted; exporters already
-    # fall back to "N/A" for the three fields they read.
+    # that batch was not the final one and has none; the last top-up call then
+    # authors it, and failing that `_recount_generated_fields` fills in what can
+    # be counted; exporters already fall back to "N/A" for the three fields they
+    # read.
     last = payloads[-1] if isinstance(payloads[-1], dict) else {}
     blueprint = last.get("blueprint") if isinstance(last.get("blueprint"), dict) else {}
+
+    # Either a batch was abandoned above, or one returned a different number of
+    # questions of some type than it was told to. Nothing here may fail the
+    # job: on any error the merged batches are returned as generated, exactly
+    # as before this step existed.
+    try:
+        reconciled = await _reconcile_counts(
+            extract_buckets({"questions": merged_questions}),
+            blueprint,
+            question_type_counts=question_type_counts,
+            requested_total=requested_total,
+            blooms_by_type=blooms_by_type,
+            blooms_str=blooms_str,
+            course_weightage=course_weightage,
+            aggregated_metadata=aggregated_metadata,
+            shared_prompt_inputs=shared_prompt_inputs,
+            job_id=job_id,
+        )
+    except Exception:
+        logger.exception(
+            f"[{job_id}] Count reconciliation failed — returning the batches "
+            f"as generated"
+        )
+        reconciled = None
+    if reconciled:
+        merged_questions, blueprint, topup_usages = reconciled
+        usages.extend(topup_usages)
+
+    produced = sum(len(v) for v in merged_questions.values())
     if not blueprint:
         logger.warning(
             f"[{job_id}] No blueprint in the final batch response — the run was cut "
@@ -850,9 +1089,221 @@ async def _generate_in_batches(
     usage = _merge_usage(usages)
     logger.info(
         f"[{job_id}] Batched generation complete | {produced} questions | "
-        f"{len(payloads)} batches | total_tokens={usage.get('total_token_count', 'N/A')}"
+        f"{len(usages)} calls | total_tokens={usage.get('total_token_count', 'N/A')}"
     )
     return assessment, usage
+
+
+def _batch_prompt_inputs(
+    shared_prompt_inputs: Dict[str, Any],
+    requested_total: int,
+) -> Dict[str, Any]:
+    """
+    `shared_prompt_inputs` as rendered for a call that holds only PART of the
+    assessment — every batch, and every top-up call on either path.
+
+    Section 11 asks the model to set question depth against the time available.
+    The limit is the whole assessment's but a batch holds a slice, so left as-is
+    a 25-question batch divides the whole budget by its own volume and reads a
+    per-question allowance several times larger than the real one.
+    """
+    batch_prompt_inputs = dict(shared_prompt_inputs)
+    batch_prompt_inputs["time_to_complete"] = _format_batch_time_limit(
+        shared_prompt_inputs.get("time_to_complete"), requested_total,
+    )
+    return batch_prompt_inputs
+
+
+async def _run_batches(
+    batches: List[Batch],
+    *,
+    digest: List[Dict[str, str]],
+    question_type_counts: Dict[str, int],
+    requested_total: int,
+    blooms_str: str,
+    course_weightage: Optional[Any],
+    batch_prompt_inputs: Dict[str, Any],
+    job_id: Optional[str],
+    label: str = "",
+) -> Tuple[List[Any], List[Any]]:
+    """
+    Generate `batches` one after another. Each is shown `digest` — the questions
+    already generated — which is extended in place as batches complete.
+
+    Returns the payloads and usages of the batches that succeeded, stopping at
+    the first that fails after its retries.
+    """
+    payloads: List[Any] = []
+    usages: List[Any] = []
+
+    for batch in batches:
+        prompt = build_prompt(
+            batch_prompt_inputs,
+            question_type_counts=batch.type_counts,
+            total_questions=batch.total,
+            blooms_distribution=(
+                format_blooms_by_type(batch.blooms_by_type)
+                if batch.blooms_by_type else blooms_str
+            ),
+            course_weightage_instruction=build_course_distribution_instruction(
+                course_weightage, batch.course_counts or None,
+            ),
+            total_questions_text=(
+                _format_final_batch_total(batch, requested_total, question_type_counts)
+                if batch.is_final else None
+            ),
+            blueprint_section=None if batch.is_final else "",
+            output_format_section=(
+                None if batch.is_final
+                else ASSESSMENT_PROMPTS.get("output_format_section_batch", "")
+            ),
+            previously_generated=format_previously_generated(digest),
+        )
+        schema = ASSESSMENT_SCHEMA if batch.is_final else schema_without_blueprint()
+
+        try:
+            payload, usage = await _generate_question_batch(
+                prompt=prompt, schema=schema, batch=batch, job_id=job_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — already retried inside
+            # Stop rather than skip ahead. A later batch is written against the
+            # list of what came before, so generating past a hole gives every
+            # remaining call an incomplete picture — and each one costs minutes
+            # on a job already known to come up short.
+            logger.error(
+                f"[{job_id}] {label}{batch.describe()} failed after retries — keeping "
+                f"the {len(payloads)} batch(es) already generated | {exc}"
+            )
+            break
+
+        payloads.append(payload)
+        usages.append(usage)
+        digest.extend(summarize_for_dedup(payload))
+        logger.info(
+            f"[{job_id}] {label}{batch.describe()} complete | "
+            f"{len(digest)}/{requested_total} questions so far"
+        )
+
+    return payloads, usages
+
+
+async def _reconcile_counts(
+    pool: Buckets,
+    blueprint: Dict[str, Any],
+    *,
+    question_type_counts: Dict[str, int],
+    requested_total: int,
+    blooms_by_type: Dict[str, List[str]],
+    blooms_str: str,
+    course_weightage: Optional[Any],
+    aggregated_metadata: Dict[str, Any],
+    shared_prompt_inputs: Dict[str, Any],
+    job_id: Optional[str],
+) -> Optional[Tuple[Buckets, Dict[str, Any], List[Any]]]:
+    """
+    Bring the generated questions to the requested per-type counts.
+
+    Runs only when some type's count differs from the request, or a type that
+    was not requested is present — which covers every case where the total is
+    off. Returns None otherwise, and the caller keeps its output untouched.
+
+      * Extras are trimmed (`trim_to_counts`): only from a type over its count,
+        only as many as it is over by, choosing which go by the Bloom's and
+        course distributions.
+      * A shortfall is generated as NEW calls, after all the original ones,
+        planned with `plan_batches` exactly as a request would be — so a large
+        shortfall is still split at QUESTION_BATCH_SIZE. Each call asks for the
+        missing count per type, the type's assigned Bloom's levels not yet used
+        by the kept questions, and the course quantities not yet met; and is
+        shown every kept question so it does not repeat them.
+      * The top-up output is trimmed the same way, and the next round fills
+        whatever is still short, up to TOPUP_MAX_ROUNDS.
+
+    If no blueprint exists yet (a batched run cut short before its last batch),
+    the last top-up call authors it.
+
+    Returns (questions, blueprint, top-up usages).
+    """
+    wanted = requested_counts(question_type_counts)
+    if count_by_type(pool) == wanted:
+        return None
+
+    course_targets = course_counts_from_weightage(course_weightage, requested_total)
+    trim_inputs = dict(
+        blooms_by_type=blooms_by_type,
+        course_counts=course_targets,
+        aggregated_metadata=aggregated_metadata,
+    )
+    logger.warning(
+        f"[{job_id}] Generated counts {count_by_type(pool)} differ from the "
+        f"requested {wanted} — reconciling"
+    )
+
+    kept, dropped = trim_to_counts(pool, wanted, **trim_inputs)
+    if dropped:
+        logger.info(f"[{job_id}] Trimmed extras by type: {dropped}")
+
+    batch_prompt_inputs = _batch_prompt_inputs(shared_prompt_inputs, requested_total)
+    usages: List[Any] = []
+
+    for round_no in range(1, max(0, TOPUP_MAX_ROUNDS) + 1):
+        missing = shortfall(wanted, kept)
+        if not missing:
+            break
+
+        blooms = remaining_blooms(blooms_by_type, kept, missing)
+        courses = remaining_course_counts(
+            course_targets, kept, sum(missing.values()), aggregated_metadata,
+        )
+        logger.warning(
+            f"[{job_id}] Top-up round {round_no}/{TOPUP_MAX_ROUNDS} | missing {missing}"
+            + (f" | Bloom's {blooms}" if blooms else "")
+            + (f" | courses {courses}" if courses else "")
+        )
+
+        batches = plan_batches(missing, blooms, courses or None)
+        for batch in batches:
+            batch.is_final = False
+        if batches and not blueprint:
+            batches[-1].is_final = True
+
+        payloads, round_usages = await _run_batches(
+            batches,
+            digest=summarize_for_dedup({"questions": kept}),
+            question_type_counts=question_type_counts,
+            requested_total=requested_total,
+            blooms_str=blooms_str,
+            course_weightage=course_weightage,
+            batch_prompt_inputs=batch_prompt_inputs,
+            job_id=job_id,
+            label=f"top-up {round_no} ",
+        )
+        usages.extend(round_usages)
+
+        for payload in payloads:
+            for bucket, questions in extract_buckets(payload).items():
+                # Each top-up call numbers its questions from one, like the
+                # original call did, so fresh ids keep them from colliding.
+                for question in questions:
+                    question["question_id"] = new_question_id()
+                kept[bucket].extend(questions)
+            if not blueprint and isinstance(payload, dict) and isinstance(payload.get("blueprint"), dict):
+                blueprint = payload["blueprint"]
+
+        kept, dropped = trim_to_counts(kept, wanted, **trim_inputs)
+        if dropped:
+            logger.info(f"[{job_id}] Top-up round {round_no} trimmed extras by type: {dropped}")
+
+    missing = shortfall(wanted, kept)
+    if missing:
+        logger.error(
+            f"[{job_id}] Still short of the request after top-up — missing {missing}; "
+            f"returning {sum(len(v) for v in kept.values())}/{requested_total} questions"
+        )
+    else:
+        logger.info(f"[{job_id}] Counts reconciled to the request {wanted}")
+
+    return kept, blueprint, usages
 
 
 def _format_batch_time_limit(
@@ -911,7 +1362,7 @@ def _format_final_batch_total(
     The whole-assessment figures are written inline and NOT through
     `format_question_type_instructions`: rendering them as a second bulleted list
     in the same shape as the one directly above would put two sets of counts in
-    identical formatting inside section 9, which invites the model to generate
+    identical formatting inside section 10, which invites the model to generate
     against the wrong one.
     """
     breakdown = "; ".join(
@@ -1136,22 +1587,36 @@ def _merge_usage(usage_list: List[Optional[Dict[str, Any]]]) -> Dict[str, Any]:
     return merged
 
 
+class PromptInputs(TypedDict, total=False):
+    """
+    The prompt values shared by every call for one assessment — the single
+    call, every batch and every top-up. Built once in `generate_assessment`
+    (`shared_prompt_inputs`); a batch gets a copy with `time_to_complete`
+    restated for its slice (`_batch_prompt_inputs`).
+
+    `competency_focus_instruction` and `case_study_levels` are optional; the
+    rest are required.
+    """
+    course_context: str
+    learning_objectives_str: str
+    transcript: str
+    pdf_snippets: str
+    assessment_type: str
+    difficulty_level: str
+    time_to_complete: Optional[str]
+    additional_instructions: Optional[str]
+    input_language: str
+    topic_names: str
+    competency_focus_instruction: str
+    case_study_levels: str
+
+
 def build_prompt(
-    question_type_counts:Dict[str, int],
-    course_context: str,
-    learning_objectives_str: str,
-    transcript: str,
-    pdf_snippets: str,
-    assessment_type: str,
-    difficulty_level: str,
+    inputs: PromptInputs,
+    question_type_counts: Dict[str, int],
     total_questions: int,
-    time_to_complete: Optional[str],
-    additional_instructions: Optional[str],
-    input_language: str,
-    topic_names: str,
     blooms_distribution: str,
     course_weightage_instruction: str,
-    competency_focus_instruction: str = "Not applicable for this assessment type.",
     *,
     total_questions_text: Optional[str] = None,
     blueprint_section: Optional[str] = None,
@@ -1172,7 +1637,24 @@ def build_prompt(
         one that authors a blueprint.
       * `output_format_section` — the questions-only variant for those batches.
       * `previously_generated` — the list of questions earlier batches produced.
+
+    `inputs` carries the values shared by every call for one assessment; see
+    `PromptInputs`.
     """
+    course_context = inputs["course_context"]
+    learning_objectives_str = inputs["learning_objectives_str"]
+    transcript = inputs["transcript"]
+    pdf_snippets = inputs["pdf_snippets"]
+    assessment_type = inputs["assessment_type"]
+    difficulty_level = inputs["difficulty_level"]
+    time_to_complete = inputs["time_to_complete"]
+    additional_instructions = inputs["additional_instructions"]
+    input_language = inputs["input_language"]
+    topic_names = inputs["topic_names"]
+    competency_focus_instruction = inputs.get(
+        "competency_focus_instruction", "Not applicable for this assessment type.")
+    case_study_levels = inputs.get("case_study_levels", "None")
+
     prompt_template = ASSESSMENT_PROMPTS.get('system_prompt_template', '')
 
     if blueprint_section is None:
@@ -1225,7 +1707,8 @@ def build_prompt(
     # v3.2 Specifics
     prompt = prompt.replace("{topic_names}", topic_names)
     prompt = prompt.replace("{blooms_distribution}", blooms_distribution)
-    
+    prompt = prompt.replace("{case_study_levels}", case_study_levels)
+
     prompt = prompt.replace("{p_version}", PROMPT_VERSION)
     prompt = prompt.replace("{a_version}", "api/v1")
 
@@ -1339,3 +1822,49 @@ def extract_pdf_text_sync(pdf_path: Path) -> str:
 
 async def extract_pdf_text(pdf_path: Path) -> str:
     return await asyncio.get_running_loop().run_in_executor(None, extract_pdf_text_sync, pdf_path)
+
+async def extract_txt_text(txt_path: Path) -> str:
+    def _read():
+        try:
+            raw = txt_path.read_text(encoding='utf-8-sig')
+        except Exception:
+            raw = txt_path.read_text(encoding='latin-1')
+        # NULs: see extract_vtt_text.
+        return raw.replace('\x00', '').strip()
+
+    return await asyncio.to_thread(_read)
+
+def extract_docx_text_sync(docx_path: Path) -> str:
+    text_parts = []
+    try:
+        doc = docx.Document(str(docx_path))
+        for para in doc.paragraphs:
+            if para.text.strip():
+                text_parts.append(para.text.strip())
+        # Tables are not part of doc.paragraphs; one line per row.
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [c.text.strip() for c in row.cells if c.text.strip()]
+                if cells:
+                    text_parts.append(" | ".join(cells))
+    except Exception as e:
+        logger.exception('DOCX extraction failed for %s: %s', docx_path, e)
+    return '\n'.join(text_parts).replace('\x00', '')
+
+async def extract_docx_text(docx_path: Path) -> str:
+    return await asyncio.get_running_loop().run_in_executor(None, extract_docx_text_sync, docx_path)
+
+_UPLOAD_EXTRACTORS = {
+    '.pdf': extract_pdf_text,
+    '.vtt': extract_vtt_text,
+    '.txt': extract_txt_text,
+    '.docx': extract_docx_text,
+}
+
+async def extract_uploaded_text(path: Path) -> str:
+    """Extract text from an uploaded file by extension; '' if the type is unsupported."""
+    extractor = _UPLOAD_EXTRACTORS.get(path.suffix.lower())
+    if extractor is None:
+        logger.warning(f"Unsupported upload type skipped: {path.name}")
+        return ""
+    return await extractor(path)

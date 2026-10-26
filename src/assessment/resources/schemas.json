@@ -226,10 +226,31 @@
                   "const": "FTB"
                 },
                 "question_text": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "One or more sentences containing EXACTLY ONE blank, written as ___, placed anywhere in the text."
                 },
-                "correct_answer": {
-                  "type": "string"
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "index": {
+                        "type": "integer",
+                        "description": "ZERO-BASED position of this option. The first option MUST be 0, the second 1, and so on. Never start at 1."
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "index"
+                    ]
+                  }
+                },
+                "correct_option_index": {
+                  "type": "integer",
+                  "description": "ZERO-BASED index of the single option that correctly fills the blank. MUST equal the `index` of that option, so 0 selects the first option. Never one-based."
                 },
                 "difficulty_level": {
                   "type": "string"
@@ -317,7 +338,8 @@
                 "question_id",
                 "question_type",
                 "question_text",
-                "correct_answer",
+                "options",
+                "correct_option_index",
                 "reasoning",
                 "relevance_percentage",
                 "answer_rationale"
