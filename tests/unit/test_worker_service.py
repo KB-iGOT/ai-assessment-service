@@ -43,8 +43,8 @@ def worker(monkeypatch, tmp_path):
         calls["fetched"].append(course_id)
         return course_id != "do_unreachable"
 
-    async def generate_assessment(**kwargs):
-        calls["generate"] = kwargs
+    async def generate_assessment(request):
+        calls["generate"] = vars(request)
         if llm_output["error"]:
             raise llm_output["error"]
         return {"courses": []}, llm_output["value"], {"total_token_count": 42}

@@ -15,6 +15,11 @@ from assessment.batching import Batch
 from assessment.questions import BUCKET_FTB, BUCKET_MCQ, BUCKET_TRUEFALSE, CANONICAL_BUCKETS
 
 
+def generate(*args, **kwargs):
+    """`generate_assessment` with the request built from keyword arguments."""
+    return gen.generate_assessment(gen.GenerationRequest(*args, **kwargs))
+
+
 def q(text, blooms=None, course=None):
     out = {"question_text": text, "question_id": "q_001"}
     if blooms:
@@ -301,7 +306,7 @@ async def test_generate_assessment_tops_up_a_short_single_call_response(monkeypa
     llm = FakeLLM([_full_response(["a"]), _full_response(["b", "c"])])
     monkeypatch.setattr(gen, "call_llm", llm)
 
-    _, result, _ = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+    _, result, _ = await generate({"mcq": 3}, enable_blooms=False)
 
     assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b", "c"]
     assert len(llm.prompts) == 2
@@ -311,7 +316,7 @@ async def test_generate_assessment_tops_up_a_short_single_call_response(monkeypa
 async def test_generate_assessment_rejects_non_json_response(monkeypatch):
     monkeypatch.setattr(gen, "call_llm", FakeLLM(["Sorry, I can't help with that."]))
     with pytest.raises(ValueError, match="not valid JSON"):
-        await gen.generate_assessment({"mcq": 1}, enable_blooms=False)
+        await generate({"mcq": 1}, enable_blooms=False)
 
 
 async def test_reconcile_failure_returns_the_response_as_generated(monkeypatch):
@@ -321,7 +326,7 @@ async def test_reconcile_failure_returns_the_response_as_generated(monkeypatch):
         raise RuntimeError("reconcile bug")
 
     monkeypatch.setattr(gen, "_reconcile_counts", explode)
-    _, result, _ = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+    _, result, _ = await generate({"mcq": 3}, enable_blooms=False)
     assert texts(result["questions"][BUCKET_MCQ]) == ["a"]
 
 
@@ -333,7 +338,7 @@ async def test_uploaded_transcript_and_document_land_in_their_own_sections(monke
     llm = FakeLLM([_full_response(["a"])])
     monkeypatch.setattr(gen, "call_llm", llm)
 
-    meta, _, _ = await gen.generate_assessment(
+    meta, _, _ = await generate(
         {"mcq": 1}, enable_blooms=False,
         extra_files=[document], transcript_files=[transcript],
     )
@@ -380,7 +385,7 @@ async def test_batched_run_merges_batches_and_sums_usage(monkeypatch, batch_size
     llm = UsageLLM([_batch_response(["STEM-ALPHA", "b"], blueprint=False), _batch_response(["c"])])
     monkeypatch.setattr(gen, "call_llm", llm)
 
-    _, result, usage = await gen.generate_assessment({"mcq": 3}, enable_blooms=False, time_limit=30)
+    _, result, usage = await generate({"mcq": 3}, enable_blooms=False, time_limit=30)
 
     assert len(llm.prompts) == 2
     assert texts(result["questions"][BUCKET_MCQ]) == ["STEM-ALPHA", "b", "c"]
@@ -403,7 +408,7 @@ async def test_batched_run_cut_short_is_topped_up_and_top_up_writes_blueprint(mo
     ])
     monkeypatch.setattr(gen, "call_llm", llm)
 
-    _, result, usage = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+    _, result, usage = await generate({"mcq": 3}, enable_blooms=False)
 
     assert len(llm.prompts) == 3
     assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b", "c"]
@@ -416,7 +421,7 @@ async def test_batched_run_with_no_blueprint_still_reports_counted_fields(monkey
     llm = UsageLLM([_batch_response(["a", "b"], blueprint=False), RuntimeError("batch 2 failed")])
     monkeypatch.setattr(gen, "call_llm", llm)
 
-    _, result, _ = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+    _, result, _ = await generate({"mcq": 3}, enable_blooms=False)
 
     assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b"]
     assert "title" not in result["blueprint"]
@@ -426,7 +431,7 @@ async def test_batched_run_with_no_blueprint_still_reports_counted_fields(monkey
 async def test_batched_run_where_every_batch_fails_raises(monkeypatch, batch_size_two):
     monkeypatch.setattr(gen, "call_llm", UsageLLM([RuntimeError("down")]))
     with pytest.raises(RuntimeError, match="Every question batch failed"):
-        await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+        await generate({"mcq": 3}, enable_blooms=False)
 
 
 async def test_batched_run_survives_a_reconcile_failure(monkeypatch, batch_size_two):
@@ -437,6 +442,31 @@ async def test_batched_run_survives_a_reconcile_failure(monkeypatch, batch_size_
         raise RuntimeError("reconcile bug")
 
     monkeypatch.setattr(gen, "_reconcile_counts", explode)
-    _, result, _ = await gen.generate_assessment({"mcq": 3}, enable_blooms=False)
+    _, result, _ = await generate({"mcq": 3}, enable_blooms=False)
     # Returned as generated (4, one over the request) rather than failing the job.
     assert texts(result["questions"][BUCKET_MCQ]) == ["a", "b", "c", "d"]
+
+
+# --------------------------------------------------------------------------
+# _should_retry — which LLM errors call_llm retries
+# --------------------------------------------------------------------------
+
+def _retry_cases():
+    import asyncio
+
+    from google.genai.errors import ClientError, ServerError
+
+    return [
+        (ServerError(503, {"error": {"message": "unavailable"}}), True),
+        (asyncio.TimeoutError(), True),
+        (ClientError(429, {"error": {"message": "RESOURCE_EXHAUSTED"}}), True),
+        (ClientError(404, {"error": {"message": "Cached content not found"}}), True),
+        (ClientError(400, {"error": {"message": "Cache expired"}}), True),
+        (ClientError(400, {"error": {"message": "Invalid argument"}}), False),
+        (ValueError("bad"), False),
+    ]
+
+
+@pytest.mark.parametrize("error,expected", _retry_cases())
+def test_should_retry(error, expected):
+    assert gen._should_retry(error) is expected
