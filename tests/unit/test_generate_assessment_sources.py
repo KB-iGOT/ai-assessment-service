@@ -99,8 +99,10 @@ async def test_course_content_is_read_once_and_deduplicated(llm, courses):
     meta, _, _ = await generate(COUNTS, course_ids=["do_1", "do_2"], enable_blooms=False)
 
     transcripts, pdfs = llm.prompt.split("PDF CONTENT:", 1)
+    # Two folders hold the same transcript; whichever rglob lists first is kept
+    # (filesystem order differs between Windows and Linux), the other skipped.
     assert transcripts.count("Course one transcript") == 1
-    assert "--- SOURCE: do_1 / m1" in transcripts
+    assert transcripts.count("--- SOURCE: do_1 / ") == 1
     assert pdfs.count("Course one handout") == 1
     assert "Course two handout" in pdfs
 
