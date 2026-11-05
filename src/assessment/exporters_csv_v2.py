@@ -75,7 +75,7 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
     for item in all_questions:
         q = item["raw"]
         q_type = item["type"]
-        difficulty_map = {"easy": "Easy", "medium": "Medium", "intermediate": "Medium", "hard": "Difficult", "difficult": "Difficult", "advanced": "Difficult"}
+        difficulty_map = {"beginner": "Easy", "easy": "Easy", "medium": "Medium", "intermediate": "Medium", "hard": "Difficult", "difficult": "Difficult", "advanced": "Difficult"}
         raw_diff = str(q.get("difficulty_level", "")).lower()
         tagging = difficulty_map.get(raw_diff, "Medium")
         
