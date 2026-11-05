@@ -191,7 +191,7 @@ def test_csv_writes_option_ftb_as_options_and_legacy_ftb_as_blank(tmp_path):
     }
     path = tmp_path / "out.csv"
     generate_csv_v2(data, path)
-    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    rows = list(csv.DictReader(path.open(encoding="utf-8-sig")))
 
     opt, legacy = rows
     assert opt["QuestionType"] == "FTB"

@@ -58,7 +58,7 @@ def test_download_csv_follows_question_order(client, fake_db):
     fake_db.add_row(JOB, data=data)
     response = client.get(f"{BASE}/download/{JOB}?format=csv")
     assert response.headers["content-type"].startswith("text/csv")
-    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8"))))
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
     assert [r["QuestionType"] for r in rows] == ["T/F", "MCQ-SCA", "MCQ-SCA", "FTB", "MTF", "MCQ-MCA"]
     mcq2 = rows[2]
     assert [mcq2[f"isOption{i}Correct"] for i in (1, 2, 3, 4)] == ["No", "No", "Yes", "No"]
@@ -67,7 +67,7 @@ def test_download_csv_follows_question_order(client, fake_db):
 def test_download_csv_basic_contains_only_mcqs(client, fake_db):
     fake_db.add_row(JOB)
     response = client.get(f"{BASE}/download/{JOB}?format=csv_basic")
-    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8"))))
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
     assert len(rows) == 3  # two MCQs + one Multi-Choice
     assert rows[0]["IsOption1Correct"] == "TRUE"
 

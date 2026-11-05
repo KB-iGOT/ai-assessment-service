@@ -172,8 +172,9 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
         rows.append(row)
         q_counter += 1
 
-    # Write CSV
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+    # Write CSV. utf-8-sig so Excel shows non-ASCII text (dashes, curly
+    # quotes, Hindi) correctly instead of guessing the ANSI codepage.
+    with open(output_path, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         writer.writerows(rows)
@@ -233,7 +234,8 @@ def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
         rows.append(row)
         q_counter += 1
 
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+    # utf-8-sig for Excel, as in generate_csv_v2.
+    with open(output_path, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         writer.writerows(rows)
