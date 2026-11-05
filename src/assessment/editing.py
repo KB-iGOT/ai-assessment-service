@@ -30,10 +30,14 @@ from .questions import (
     PROV_AI_GENERATED,
     PROV_HUMAN_AUTHORED,
     QUESTION_TYPE_CONST_BY_BUCKET,
+    SCENARIO_BUCKETS,
+    SCENARIO_TYPE_KEYS,
+    STANDARD_TYPE_KEYS,
     TYPE_KEY_BY_BUCKET,
     find_question,
     index_questions,
     is_legacy_ftb,
+    is_scenario_assessment,
     new_question_id,
     normalize_assessment,
     position_of,
@@ -159,6 +163,25 @@ def _raise_if_invalid(errors: List[Dict[str, Any]]) -> None:
     """A question that fails validation is never saved."""
     if errors:
         raise ValidationError(errors)
+
+
+def _type_mismatch_error(
+    data: Dict[str, Any], bucket: Optional[str], found: Any, question_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    A scenario assessment holds only scenario question types, and every other
+    assessment holds only the standard five. Returns the error for a question
+    whose type belongs to the other set (or to none), else None.
+    """
+    scenario = is_scenario_assessment(data)
+    if bucket is not None and (bucket in SCENARIO_BUCKETS) == scenario:
+        return None
+    return {
+        "code": "question_type_invalid",
+        "field": "question_type", "question_id": question_id,
+        "params": {"found": found,
+                   "expected": sorted(SCENARIO_TYPE_KEYS if scenario else STANDARD_TYPE_KEYS)},
+    }
 
 
 def _original_ai_question(
@@ -339,13 +362,9 @@ def apply_question_add(
     data = normalize_assessment(assessment_data)
 
     bucket = resolve_bucket(question_type)
-    if bucket is None:
-        raise ValidationError([{
-            "code": "question_type_invalid",
-            "field": "question_type", "question_id": None,
-            "params": {"found": question_type,
-                       "expected": sorted(TYPE_KEY_BY_BUCKET.values())},
-        }])
+    mismatch = _type_mismatch_error(data, bucket, question_type)
+    if mismatch:
+        raise ValidationError([mismatch])
 
     allowed = _addable_keys(bucket)
     rejected = [
@@ -559,6 +578,17 @@ def diff_assessments(
     new_order = [str(q) for q in new["question_order"]]
 
     events: List[Dict[str, Any]] = []
+
+    # A question of the other set's type (a scenario type added to a standard
+    # assessment, or the reverse) is rejected, as it is on the add endpoint.
+    type_errors = [
+        error for error in (
+            _type_mismatch_error(old, new_index[qid][0], new_index[qid][0], qid)
+            for qid in new_order if qid not in old_index
+        ) if error
+    ]
+    if type_errors:
+        raise ValidationError(type_errors)
 
     # Deleted -------------------------------------------------------------
     for qid in old_order:

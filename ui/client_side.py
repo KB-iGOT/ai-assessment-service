@@ -46,17 +46,46 @@ BUCKET_MTF = "MTF Question"
 BUCKET_MULTICHOICE = "Multi-Choice Question"
 BUCKET_TRUEFALSE = "True/False Question"
 
+# Scenario assessment buckets — a scenario assessment holds only these.
+BUCKET_SCENARIO_MCQ = "Scenario MCQ Question"
+BUCKET_SCENARIO_MULTISELECT = "Scenario Multi-Select Question"
+BUCKET_OPEN_TEXT = "Open Text Question"
+BUCKET_RANKING = "Ranking Question"
+BUCKET_ACTION_PLANNING = "Action Planning Question"
+BUCKET_SHORT_ANSWER = "Short Answer Question"
+
+SCENARIO_BUCKETS = (
+    BUCKET_SCENARIO_MCQ, BUCKET_SCENARIO_MULTISELECT, BUCKET_OPEN_TEXT,
+    BUCKET_RANKING, BUCKET_ACTION_PLANNING, BUCKET_SHORT_ANSWER,
+)
+# The written-answer scenario types, each carrying a rubric.
+RUBRIC_BUCKETS = (BUCKET_OPEN_TEXT, BUCKET_ACTION_PLANNING, BUCKET_SHORT_ANSWER)
+
 TYPE_KEY_BY_BUCKET = {
     BUCKET_MCQ: "mcq",
     BUCKET_FTB: "ftb",
     BUCKET_MTF: "mtf",
     BUCKET_MULTICHOICE: "multichoice",
     BUCKET_TRUEFALSE: "truefalse",
+    BUCKET_SCENARIO_MCQ: "scenario_mcq",
+    BUCKET_SCENARIO_MULTISELECT: "scenario_multiselect",
+    BUCKET_OPEN_TEXT: "open_text",
+    BUCKET_RANKING: "sjt_ranking",
+    BUCKET_ACTION_PLANNING: "action_planning",
+    BUCKET_SHORT_ANSWER: "short_answer",
 }
 
 # Buckets whose answer options are editable as options. An FTB qualifies only
-# in the option shape — see `is_legacy_ftb`.
-OPTION_BUCKETS = (BUCKET_MCQ, BUCKET_MULTICHOICE, BUCKET_FTB)
+# in the option shape — see `is_legacy_ftb`. A ranking question's options are
+# its actions and are edited with the ranking, not here.
+OPTION_BUCKETS = (BUCKET_MCQ, BUCKET_MULTICHOICE, BUCKET_FTB,
+                  BUCKET_SCENARIO_MCQ, BUCKET_SCENARIO_MULTISELECT)
+
+
+def is_scenario_assessment(assessment_data: Optional[Dict[str, Any]]) -> bool:
+    """Mirrors `questions.is_scenario_assessment` on the server."""
+    buckets = (assessment_data or {}).get("questions") or {}
+    return any(bucket in SCENARIO_BUCKETS for bucket in buckets)
 
 
 def is_legacy_ftb(bucket: str, question: Dict[str, Any]) -> bool:
@@ -192,6 +221,18 @@ _FIELD_IMPACT = {
                      "The Bloom's level for this question will change."),
     "relevance_percentage": ("relevance_changed", "low",
                              "The relevance percentage for this question will change."),
+    # Scenario questions
+    "correct_ranking": ("answer_key_changed", "high",
+                        "The correct ranking for this question will change."),
+    "reference_answer": ("answer_key_changed", "high",
+                         "The reference answer for this question will change."),
+    "expected_answer": ("answer_key_changed", "high",
+                        "The expected answer for this question will change."),
+    "expected_components": ("answer_key_changed", "high",
+                            "The expected plan components for this question will change."),
+    "rubric": ("rubric_changed", "high", "The rubric for this question will change."),
+    "scenario_domain": ("scenario_domain_changed", "medium",
+                        "The scenario domain of this question will change."),
 }
 
 # Used instead of the entries above when the options were only re-sequenced.
@@ -211,6 +252,7 @@ _PREFIX_IMPACT = [
     ("reasoning.learning_objective_alignment",
      ("learning_outcome_changed", "medium", "The learning outcome mapping will change.")),
     ("answer_rationale", ("rationale_changed", "low", "The answer rationale will change.")),
+    ("scenario", ("scenario_changed", "medium", "The scenario of this question will change.")),
 ]
 
 
@@ -493,6 +535,40 @@ def error_text(error: Dict[str, Any]) -> str:
         return "Question identifiers must be unique."
     if code == "request_required":
         return 'The request body must be the Sunbird envelope: {"request": {...}}.'
+
+    # Scenario questions and rubrics.
+    simple = {
+        "scenario_title_required": "The scenario needs a title.",
+        "scenario_description_required": "The scenario needs a description.",
+        "scenario_constraints_invalid": "Scenario constraints must be a list of non-empty lines.",
+        "scenario_domain_required": "A scenario domain is required.",
+        "reference_answer_required": "An open text question requires a reference answer.",
+        "expected_answer_required": "A short answer question requires an expected answer.",
+        "expected_components_required": "At least one expected plan component is required.",
+        "correct_ranking_required": "A ranking question requires the correct ranking.",
+        "rubric_required": "This question type requires a rubric.",
+        "rubric_criterion_duplicate": "Rubric criterion names must be unique.",
+    }
+    if code in simple:
+        return simple[code]
+    if code == "correct_ranking_invalid":
+        return ("The ranking must list every option's index exactly once, most effective "
+                f"first (valid indexes: {_fmt_list(p.get('valid_indexes'))}).")
+    if code == "rubric_weight_total_invalid":
+        return f"Rubric weights must add up to {p.get('expected')}% (found {p.get('found')}%)."
+    if code == "rubric_weight_invalid":
+        return (f"Criterion {p.get('criterion_position')} needs a whole-number weight between "
+                f"{p.get('minimum')} and {p.get('maximum')}.")
+    if code == "rubric_anchor_required":
+        return (f"Criterion {p.get('criterion_position')} is missing score anchor(s) "
+                f"{_fmt_list(p.get('missing'))}.")
+    if code == "rubric_evidence_invalid":
+        return (f"Criterion {p.get('criterion_position')}: evidence indicators must be a "
+                "list of non-empty lines.")
+    if code in ("rubric_criterion_required", "rubric_criterion_malformed"):
+        what = {"rubric_criterion_required": "a name",
+                "rubric_criterion_malformed": "to be an object"}[code]
+        return f"Criterion {p.get('criterion_position')} needs {what}."
 
     # Request-level failures. These reach the client in the same code+params
     # shape as a field-level one — the API stopped sending an English `detail`

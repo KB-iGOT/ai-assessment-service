@@ -125,6 +125,9 @@ async def process_job(payload: Dict[str, Any]):
                 competency_themes=payload.get('competency_themes'),
                 competency_sub_themes=payload.get('competency_sub_themes'),
                 course_names=payload.get('course_names', []),
+                assessment_topic=payload.get('assessment_topic'),
+                scenario_domains=payload.get('scenario_domains'),
+                target_audience=payload.get('target_audience'),
             ))
         llm_duration = round(time.monotonic() - t_llm, 2)
         input_tokens = usage.get('prompt_token_count', 'N/A') if usage else 'N/A'
@@ -153,6 +156,9 @@ async def process_job(payload: Dict[str, Any]):
             "blooms_config": payload.get('blooms_distribution'),
             "enable_blooms": payload.get('enable_blooms'),
             "additional_instructions": payload.get('additional_instructions'),
+            "assessment_topic": payload.get('assessment_topic'),
+            "scenario_domains": payload.get('scenario_domains'),
+            "target_audience": payload.get('target_audience'),
         }
 
         # 6. Bring the LLM output into the editable model before it is stored:

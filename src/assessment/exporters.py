@@ -1,7 +1,9 @@
+import html
 import json
 import logging
 import os
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 from annotated_types import doc
 from docx import Document
 from docx.shared import Pt, Inches
@@ -10,7 +12,19 @@ from docx.shared import Pt, Inches
 from weasyprint import HTML, CSS
 from weasyprint.text.fonts import FontConfiguration
 
-from .questions import answers_by_single_option, iter_questions_in_order
+from .questions import (
+    BUCKET_ACTION_PLANNING,
+    BUCKET_OPEN_TEXT,
+    BUCKET_RANKING,
+    BUCKET_SCENARIO_MCQ,
+    BUCKET_SCENARIO_MULTISELECT,
+    BUCKET_SHORT_ANSWER,
+    RUBRIC_ANCHOR_LEVELS,
+    RUBRIC_BUCKETS,
+    SCENARIO_BUCKETS,
+    answers_by_single_option,
+    iter_questions_in_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +45,190 @@ RESOURCE_DIR = Path(__file__).parent / "resources" / "fonts"
 DISPLAY_LABELS = {
     "Multiple Choice Question": "Single selection MCQs",
     "Multi-Choice Question": "Multiple selection MCQs",
+    BUCKET_SCENARIO_MCQ: "Scenario-based MCQ",
+    BUCKET_SCENARIO_MULTISELECT: "Scenario-based multi select",
+    BUCKET_OPEN_TEXT: "Open text",
+    BUCKET_RANKING: "Situational judgment ranking",
+    BUCKET_ACTION_PLANNING: "Action and decision planning",
+    BUCKET_SHORT_ANSWER: "Scenario-based short answer",
 }
+
+ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+# --------------------------------------------------------------------------
+# Scenario questions — shared by the PDF and DOCX exports
+# --------------------------------------------------------------------------
+
+def _scenario_parts(q: Dict[str, Any]) -> Dict[str, Any]:
+    scenario = q.get("scenario") if isinstance(q.get("scenario"), dict) else {}
+    return {
+        "title": str(scenario.get("title") or ""),
+        "description": str(scenario.get("description") or ""),
+        "constraints": [str(c) for c in scenario.get("constraints") or [] if str(c).strip()],
+    }
+
+
+def _option_letter_by_index(options: List[Dict[str, Any]]) -> Dict[int, str]:
+    """Option `index` value -> the letter it is displayed under."""
+    out: Dict[int, str] = {}
+    for i, option in enumerate(options):
+        try:
+            out[int(option["index"]) if option.get("index") is not None else i] = ALPHA[i]
+        except (TypeError, ValueError, IndexError):
+            continue
+    return out
+
+
+def _scenario_answer_lines(bucket: str, q: Dict[str, Any]) -> List[str]:
+    """The answer key of a scenario question, as label: value lines."""
+    options = q.get("options") or []
+    letters = _option_letter_by_index(options)
+
+    def letters_for(values: Any) -> List[str]:
+        values = values if isinstance(values, list) else ([] if values is None else [values])
+        out = []
+        for value in values:
+            try:
+                out.append(letters.get(int(value), "?"))
+            except (TypeError, ValueError):
+                out.append("?")
+        return out
+
+    if bucket == BUCKET_SCENARIO_MCQ:
+        return [f"Correct Answer: {', '.join(letters_for(q.get('correct_option_index'))) or 'N/A'}"]
+    if bucket == BUCKET_SCENARIO_MULTISELECT:
+        return [f"Correct Options: {', '.join(letters_for(q.get('correct_option_index'))) or 'N/A'}"]
+    if bucket == BUCKET_RANKING:
+        order = " > ".join(letters_for(q.get("correct_ranking"))) or "N/A"
+        return [f"Correct Ranking (most to least effective): {order}"]
+    if bucket == BUCKET_OPEN_TEXT:
+        return [f"Reference Answer: {q.get('reference_answer') or 'N/A'}"]
+    if bucket == BUCKET_SHORT_ANSWER:
+        return [f"Expected Answer: {q.get('expected_answer') or 'N/A'}"]
+    return []
+
+
+def _scenario_answer_list(bucket: str, q: Dict[str, Any]) -> Optional[tuple]:
+    """(heading, items) for the bulleted part of a written answer key, if any."""
+    if bucket == BUCKET_ACTION_PLANNING and q.get("expected_components"):
+        return "Expected Components", [str(c) for c in q["expected_components"]]
+    return None
+
+
+def _rubric_rows(q: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [c for c in q.get("rubric") or [] if isinstance(c, dict)]
+
+
+def _scenario_question_html(number: int, bucket: str, q: Dict[str, Any]) -> str:
+    e = lambda value: html.escape(str(value if value is not None else ""))  # noqa: E731
+    parts = _scenario_parts(q)
+    out = [
+        "<div class='question-block'>",
+        f"<div class='type-label'>{e(DISPLAY_LABELS.get(bucket, bucket))}</div>",
+        "<div class='scenario-box'>",
+        f"<b>Scenario: {e(parts['title'])}</b><br/>{e(parts['description'])}",
+    ]
+    if parts["constraints"]:
+        out.append("<br/><i>Constraints:</i><ul>"
+                   + "".join(f"<li>{e(c)}</li>" for c in parts["constraints"]) + "</ul>")
+    out.append("</div>")
+    out.append(f"<div class='question-text'>Q{number}: {e(q.get('question_text'))}</div>")
+
+    options = q.get("options") or []
+    if options:
+        out.append("<ul class='options-list'>" + "".join(
+            f"<li>{ALPHA[i]}. {e(o.get('text'))}</li>" for i, o in enumerate(options[:len(ALPHA)])
+        ) + "</ul>")
+    for line in _scenario_answer_lines(bucket, q):
+        out.append(f"<div class='correct'>{e(line)}</div>")
+    answer_list = _scenario_answer_list(bucket, q)
+    if answer_list:
+        heading, items = answer_list
+        out.append(f"<div><b>{e(heading)}:</b><ul>"
+                   + "".join(f"<li>{e(i)}</li>" for i in items) + "</ul></div>")
+
+    rubric = _rubric_rows(q) if bucket in RUBRIC_BUCKETS else []
+    if rubric:
+        header = "".join(f"<th>{level}</th>" for level in RUBRIC_ANCHOR_LEVELS)
+        rows = []
+        for c in rubric:
+            anchors = c.get("score_anchors") if isinstance(c.get("score_anchors"), dict) else {}
+            evidence = "<br/>".join(f"• {e(x)}" for x in c.get("evidence_indicators") or [])
+            rows.append(
+                f"<tr><td><b>{e(c.get('criterion'))}</b><br/>{e(c.get('description'))}"
+                + f"</td><td>{e(c.get('weight_percent'))}%</td>"
+                + "".join(f"<td>{e(anchors.get(level))}</td>" for level in RUBRIC_ANCHOR_LEVELS)
+                + f"<td>{evidence}</td></tr>"
+            )
+        out.append("<div class='rubric'><b>Rubric</b><table class='rubric-table'>"
+                   f"<tr><th>Criterion</th><th>Weight</th>{header}<th>Evidence</th></tr>"
+                   + "".join(rows) + "</table></div>")
+
+    ar = q.get("answer_rationale") if isinstance(q.get("answer_rationale"), dict) else {}
+    provenance = PROVENANCE_LABELS.get(q.get("provenance"), q.get("provenance") or "N/A")
+    box = [
+        f"<b>Rationale:</b> {e(ar.get('correct_answer_explanation') or 'N/A')}",
+        f"<b>Scenario Domain:</b> {e(q.get('scenario_domain') or 'N/A')}",
+        f"<b>Provenance:</b> {e(provenance)}",
+    ]
+    out.append("<div class='reasoning-box'>" + "<br/>".join(box) + "</div>")
+    out.append("</div>")
+    return "\n".join(out)
+
+
+def _add_scenario_question_docx(doc, number: int, bucket: str, q: Dict[str, Any]) -> None:
+    parts = _scenario_parts(q)
+
+    doc.add_paragraph().add_run(DISPLAY_LABELS.get(bucket, bucket)).italic = True
+    doc.add_paragraph().add_run(f"Scenario: {parts['title']}").bold = True
+    doc.add_paragraph(parts["description"])
+    if parts["constraints"]:
+        doc.add_paragraph().add_run("Constraints:").italic = True
+        for constraint in parts["constraints"]:
+            doc.add_paragraph(constraint, style='List Bullet')
+
+    doc.add_paragraph().add_run(f"{number}. {q.get('question_text') or 'N/A'}").bold = True
+
+    for i, option in enumerate((q.get("options") or [])[:len(ALPHA)]):
+        doc.add_paragraph(f"{ALPHA[i]}. {option.get('text', '')}", style='List Bullet')
+    for line in _scenario_answer_lines(bucket, q):
+        doc.add_paragraph().add_run(line).bold = True
+    answer_list = _scenario_answer_list(bucket, q)
+    if answer_list:
+        heading, items = answer_list
+        doc.add_paragraph().add_run(f"{heading}:").bold = True
+        for item in items:
+            doc.add_paragraph(item, style='List Bullet')
+
+    rubric = _rubric_rows(q) if bucket in RUBRIC_BUCKETS else []
+    if rubric:
+        doc.add_paragraph().add_run("Rubric").bold = True
+        headers = ["Criterion", "Weight", *RUBRIC_ANCHOR_LEVELS, "Evidence"]
+        table = doc.add_table(rows=1, cols=len(headers))
+        table.style = 'Table Grid'
+        for cell, text in zip(table.rows[0].cells, headers):
+            cell.text = text
+        for c in rubric:
+            anchors = c.get("score_anchors") if isinstance(c.get("score_anchors"), dict) else {}
+            evidence = "\n".join(f"• {x}" for x in c.get("evidence_indicators") or [])
+            criterion = f"{c.get('criterion', '')}\n{c.get('description', '')}".strip()
+            cells = table.add_row().cells
+            values = [criterion, f"{c.get('weight_percent', '')}%",
+                      *[str(anchors.get(level) or "") for level in RUBRIC_ANCHOR_LEVELS],
+                      evidence]
+            for cell, text in zip(cells, values):
+                cell.text = text
+
+    ar = q.get("answer_rationale") if isinstance(q.get("answer_rationale"), dict) else {}
+    doc.add_paragraph().add_run(
+        f"Rationale: {ar.get('correct_answer_explanation') or 'N/A'}").italic = True
+    doc.add_paragraph(f"Scenario Domain: {q.get('scenario_domain') or 'N/A'}")
+    doc.add_paragraph(
+        f"Provenance: {PROVENANCE_LABELS.get(q.get('provenance'), q.get('provenance') or 'N/A')}"
+    )
+    doc.add_paragraph()
+
 
 def get_css_font_faces() -> str:
     """Generates CSS @font-face rules for all available Noto fonts."""
@@ -106,6 +303,15 @@ def generate_html_content(assessment_data: dict) -> str:
             .correct { color: #27ae60; font-weight: bold; }
             .type-label { font-size: 9pt; color: #7f8c8d; text-transform: uppercase; letter-spacing: 0.5px; }
             .type-summary { font-size: 10pt; color: #555; }
+            .scenario-box { background-color: #fdf8ec; border-left: 4px solid #e0a800; padding: 10px; margin-bottom: 8px; }
+            .rubric-table { width: 100%%; table-layout: fixed; border-collapse: collapse; margin-top: 6px; font-size: 8.5pt; }
+            .rubric-table th, .rubric-table td { border: 1px solid #ddd; padding: 4px; vertical-align: top; text-align: left;
+                                                 box-sizing: border-box; overflow-wrap: anywhere; word-break: break-word; }
+            .rubric-table th:nth-child(1) { width: 18%%; }
+            .rubric-table th:nth-child(2) { width: 8%%; }
+            .rubric-table th:nth-child(n+3) { width: 14%%; }
+            .rubric-table th:nth-child(7) { width: 18%%; }
+            .rubric-table th { background-color: #f2f2f2; }
         </style>
     </head>
     <body>
@@ -131,6 +337,10 @@ def generate_html_content(assessment_data: dict) -> str:
         html_parts.append(f"<p class='type-summary'><b>Question types:</b> {summary}</p>")
 
     for q_counter, (q_type, q) in enumerate(iter_questions_in_order(assessment_data), start=1):
+        if q_type in SCENARIO_BUCKETS:
+            html_parts.append(_scenario_question_html(q_counter, q_type, q))
+            continue
+
         if q_type == "MTF Question":
             default_q_txt = q.get("matching_context", "Match the following items appropriately:")
         else:
@@ -230,6 +440,10 @@ def generate_docx(assessment_data: dict, output_path: Path):
     # One ordered list in the assessment's authoritative sequence, matching the
     # PDF, CSV and JSON exports.
     for position, (q_type, q) in enumerate(iter_questions_in_order(assessment_data), start=1):
+        if q_type in SCENARIO_BUCKETS:
+            _add_scenario_question_docx(doc, position, q_type, q)
+            continue
+
         if q_type == "MTF Question":
             default_q_txt = q.get("matching_context", "Match the following items appropriately:")
         else:

@@ -39,14 +39,16 @@ def requested_counts(type_counts: Optional[Dict[str, Any]]) -> Dict[str, int]:
     return out
 
 
-def extract_buckets(result: Any) -> Buckets:
+def extract_buckets(result: Any, layout: Optional[List[str]] = None) -> Buckets:
     """
     The questions in a response, per canonical bucket, in the order returned.
 
     Bucket names are resolved the same way `merge_batches` resolves them. A name
     that resolves to no known type is left out: nothing downstream asked for it.
+    `layout` is the bucket set to collect — `CANONICAL_BUCKETS` unless the
+    scenario path passes `SCENARIO_BUCKETS`.
     """
-    buckets: Buckets = {bucket: [] for bucket in CANONICAL_BUCKETS}
+    buckets: Buckets = {bucket: [] for bucket in (layout or CANONICAL_BUCKETS)}
     for name, questions in _unwrap_questions(result).items():
         if not isinstance(questions, list):
             continue
@@ -129,6 +131,7 @@ def trim_to_counts(
     blooms_by_type: Optional[Dict[str, List[str]]] = None,
     course_counts: Optional[Dict[str, int]] = None,
     aggregated_metadata: Optional[Dict[str, Any]] = None,
+    layout: Optional[List[str]] = None,
 ) -> Tuple[Buckets, Dict[str, int]]:
     """
     Keep at most the requested number of each type, and nothing of a type that
@@ -143,7 +146,8 @@ def trim_to_counts(
       2. a course already at its quota, or not one of the weighted courses
       3. the latest returned
 
-    The kept questions stay in the order they were returned.
+    The kept questions stay in the order they were returned. `layout` is the
+    bucket set of the result, as for `extract_buckets`.
 
     Returns the trimmed buckets and how many questions were dropped per type.
     """
@@ -153,7 +157,7 @@ def trim_to_counts(
         {b: q for b, q in buckets.items() if TYPE_KEY_BY_BUCKET.get(b) in wanted},
         course_counts, aggregated_metadata,
     )
-    kept: Buckets = {bucket: [] for bucket in CANONICAL_BUCKETS}
+    kept: Buckets = {bucket: [] for bucket in (layout or CANONICAL_BUCKETS)}
     dropped: Dict[str, int] = {}
     for bucket, questions in buckets.items():
         type_key = TYPE_KEY_BY_BUCKET.get(bucket)

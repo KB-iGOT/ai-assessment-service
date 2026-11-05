@@ -49,6 +49,7 @@ from typing import Any, Deque, Dict, Iterable, List, Optional
 
 from .config import QUESTION_BATCH_SIZE
 from .questions import (
+    ALL_BUCKETS,
     CANONICAL_BUCKETS,
     TYPE_KEY_BY_BUCKET,
     new_question_id,
@@ -58,8 +59,10 @@ from .questions import (
 logger = logging.getLogger(__name__)
 
 # Types are planned in canonical bucket order so a batch's contents line up with
-# the order the merged payload lays its buckets out in.
-TYPE_ORDER: List[str] = [TYPE_KEY_BY_BUCKET[b] for b in CANONICAL_BUCKETS]
+# the order the merged payload lays its buckets out in. A request only ever
+# holds standard or scenario types, so listing both sets here changes nothing
+# for either.
+TYPE_ORDER: List[str] = [TYPE_KEY_BY_BUCKET[b] for b in ALL_BUCKETS]
 
 # How much of a question's stem is carried into the next batch's "already
 # generated" list. Enough to recognise the concept, not the whole item.
@@ -97,7 +100,10 @@ def _ordered_types(question_type_counts: Dict[str, int]) -> List[str]:
     return known + extra
 
 
-def plan_type_counts(question_type_counts: Dict[str, int]) -> List[Dict[str, int]]:
+def plan_type_counts(
+    question_type_counts: Dict[str, int],
+    batch_size: Optional[int] = None,
+) -> List[Dict[str, int]]:
     """
     Pour the types into batches in canonical order, flushing at the cap.
 
@@ -108,8 +114,11 @@ def plan_type_counts(question_type_counts: Dict[str, int]) -> List[Dict[str, int
 
     Every batch but the last comes out exactly full, so this produces the
     smallest number of batches the request can be served in.
+
+    `batch_size` defaults to QUESTION_BATCH_SIZE; the scenario path passes its
+    own, smaller cap because each of its questions is several times larger.
     """
-    batch_cap = max(1, QUESTION_BATCH_SIZE)
+    batch_cap = max(1, QUESTION_BATCH_SIZE if batch_size is None else batch_size)
     batches: List[Dict[str, int]] = []
     current: Dict[str, int] = {}
 
@@ -199,14 +208,16 @@ def plan_batches(
     question_type_counts: Dict[str, int],
     blooms_by_type: Optional[Dict[str, List[str]]] = None,
     course_targets: Optional[Dict[str, int]] = None,
+    batch_size: Optional[int] = None,
 ) -> List[Batch]:
     """
     Build the full batch plan.
 
     `blooms_by_type` is empty when Bloom's is disabled, and `course_targets` is
     None whenever no course weightage was supplied — both are handled.
+    `batch_size` is passed through to `plan_type_counts`.
     """
-    type_counts_per_batch = plan_type_counts(question_type_counts or {})
+    type_counts_per_batch = plan_type_counts(question_type_counts or {}, batch_size)
     if not type_counts_per_batch:
         return []
 
@@ -338,6 +349,12 @@ def _stem(question: Dict[str, Any], type_key: str) -> str:
         return " | ".join(parts)
 
     text = " ".join(str(question.get("question_text") or "").split())
+    # A scenario question is identified as much by its scenario as by its
+    # question, so the scenario title leads the stem.
+    scenario = question.get("scenario")
+    title = " ".join(str(scenario.get("title") or "").split()) if isinstance(scenario, dict) else ""
+    if title:
+        text = f"[{title}] {text}"
     if len(text) <= STEM_MAX_CHARS:
         return text
     return text[:STEM_MAX_CHARS - 3].rstrip() + "..."
@@ -356,7 +373,7 @@ def summarize_for_dedup(result: Any) -> List[Dict[str, str]]:
     for name, questions in _unwrap_questions(result).items():
         if not isinstance(questions, list):
             continue
-        bucket = name if name in CANONICAL_BUCKETS else (resolve_bucket(name) or name)
+        bucket = name if name in ALL_BUCKETS else (resolve_bucket(name) or name)
         type_key = TYPE_KEY_BY_BUCKET.get(bucket, bucket)
         for question in questions:
             if not isinstance(question, dict):
@@ -379,6 +396,7 @@ def summarize_for_dedup(result: Any) -> List[Dict[str, str]]:
                     if isinstance(kcm, dict) else ""
                 ),
                 "course_name": str(question.get("course_name") or "").strip(),
+                "scenario_domain": str(question.get("scenario_domain") or "").strip(),
             })
     return summary
 
@@ -387,11 +405,13 @@ def merge_batches(
     batch_results: List[Any],
     *,
     mint_ids: bool = True,
+    layout: Optional[List[str]] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Combine every batch's questions into one bucket dict.
 
-    Buckets are laid out in `CANONICAL_BUCKETS` order. That is a correctness
+    Buckets are laid out in `layout` order — `CANONICAL_BUCKETS` unless the
+    scenario path passes `SCENARIO_BUCKETS`. That is a correctness
     requirement, not presentation: `questions.normalize_assessment` backfills
     `question_order` from the payload's own bucket order, so a merge in any other
     order renumbers every question in every export.
@@ -401,7 +421,9 @@ def merge_batches(
     de-duplicate those into `mcq_001_2`-style ids without losing anything, but
     minting here keeps them clean.
     """
-    merged: Dict[str, List[Dict[str, Any]]] = {bucket: [] for bucket in CANONICAL_BUCKETS}
+    merged: Dict[str, List[Dict[str, Any]]] = {
+        bucket: [] for bucket in (layout or CANONICAL_BUCKETS)
+    }
 
     for result in batch_results:
         for name, questions in _unwrap_questions(result).items():

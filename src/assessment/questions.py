@@ -36,7 +36,7 @@ import copy
 import random
 import re
 import uuid
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 from .config import NORMALIZE_OPTION_INDEX_BASE
 
@@ -50,6 +50,16 @@ BUCKET_MTF = "MTF Question"
 BUCKET_MULTICHOICE = "Multi-Choice Question"
 BUCKET_TRUEFALSE = "True/False Question"
 
+# Scenario assessment buckets. A scenario assessment holds these six and none
+# of the five above; every other assessment type holds the five and none of
+# these. See `bucket_layout`.
+BUCKET_SCENARIO_MCQ = "Scenario MCQ Question"
+BUCKET_SCENARIO_MULTISELECT = "Scenario Multi-Select Question"
+BUCKET_OPEN_TEXT = "Open Text Question"
+BUCKET_RANKING = "Ranking Question"
+BUCKET_ACTION_PLANNING = "Action Planning Question"
+BUCKET_SHORT_ANSWER = "Short Answer Question"
+
 # Same order as `questions.required` in resources/schemas.json. Used to lay out
 # the bucket dict and as a last-resort ordering; it is deliberately NOT the
 # fallback used to backfill `question_order` on legacy rows — see pass 2 of
@@ -62,6 +72,22 @@ CANONICAL_BUCKETS: List[str] = [
     BUCKET_TRUEFALSE,
 ]
 
+# Same order as `scenario_schema.properties.questions.required` in
+# resources/schemas.json — the order the framework document lists the types in.
+SCENARIO_BUCKETS: List[str] = [
+    BUCKET_SCENARIO_MCQ,
+    BUCKET_SCENARIO_MULTISELECT,
+    BUCKET_OPEN_TEXT,
+    BUCKET_RANKING,
+    BUCKET_ACTION_PLANNING,
+    BUCKET_SHORT_ANSWER,
+]
+
+ALL_BUCKETS: List[str] = CANONICAL_BUCKETS + SCENARIO_BUCKETS
+
+# The written-answer scenario types. Each carries a criterion rubric.
+RUBRIC_BUCKETS = (BUCKET_OPEN_TEXT, BUCKET_ACTION_PLANNING, BUCKET_SHORT_ANSWER)
+
 # Short type key (the `question_type_counts` / API vocabulary) -> bucket.
 BUCKET_BY_TYPE_KEY: Dict[str, str] = {
     "mcq": BUCKET_MCQ,
@@ -69,8 +95,17 @@ BUCKET_BY_TYPE_KEY: Dict[str, str] = {
     "mtf": BUCKET_MTF,
     "multichoice": BUCKET_MULTICHOICE,
     "truefalse": BUCKET_TRUEFALSE,
+    "scenario_mcq": BUCKET_SCENARIO_MCQ,
+    "scenario_multiselect": BUCKET_SCENARIO_MULTISELECT,
+    "open_text": BUCKET_OPEN_TEXT,
+    "sjt_ranking": BUCKET_RANKING,
+    "action_planning": BUCKET_ACTION_PLANNING,
+    "short_answer": BUCKET_SHORT_ANSWER,
 }
 TYPE_KEY_BY_BUCKET: Dict[str, str] = {v: k for k, v in BUCKET_BY_TYPE_KEY.items()}
+
+SCENARIO_TYPE_KEYS: List[str] = [TYPE_KEY_BY_BUCKET[b] for b in SCENARIO_BUCKETS]
+STANDARD_TYPE_KEYS: List[str] = [TYPE_KEY_BY_BUCKET[b] for b in CANONICAL_BUCKETS]
 
 # The `question_type` const each bucket carries inside the question object
 # (see resources/schemas.json).
@@ -80,7 +115,33 @@ QUESTION_TYPE_CONST_BY_BUCKET: Dict[str, str] = {
     BUCKET_MTF: "MTF",
     BUCKET_MULTICHOICE: "MULTICHOICE",
     BUCKET_TRUEFALSE: "TRUEFALSE",
+    BUCKET_SCENARIO_MCQ: "SCENARIO_MCQ",
+    BUCKET_SCENARIO_MULTISELECT: "SCENARIO_MULTISELECT",
+    BUCKET_OPEN_TEXT: "OPEN_TEXT",
+    BUCKET_RANKING: "SJT_RANKING",
+    BUCKET_ACTION_PLANNING: "ACTION_PLANNING",
+    BUCKET_SHORT_ANSWER: "SHORT_ANSWER",
 }
+
+
+def bucket_layout(names: Iterable[str]) -> List[str]:
+    """
+    The bucket set an assessment uses, decided by the bucket names (or type
+    keys) it already holds: the scenario buckets if any name is one of them,
+    otherwise the standard five.
+
+    Read from the payload rather than from the request's assessment type,
+    because the editing and export paths only ever see the stored payload.
+    """
+    for name in names or []:
+        if resolve_bucket(str(name)) in SCENARIO_BUCKETS:
+            return SCENARIO_BUCKETS
+    return CANONICAL_BUCKETS
+
+
+def is_scenario_assessment(assessment_data: Optional[Dict[str, Any]]) -> bool:
+    questions = (assessment_data or {}).get("questions")
+    return isinstance(questions, dict) and bucket_layout(questions) is SCENARIO_BUCKETS
 
 # --------------------------------------------------------------------------
 # Provenance
@@ -110,7 +171,14 @@ MAX_OPTION_COUNT: Dict[str, Optional[int]] = {
     BUCKET_MCQ: 5,
     BUCKET_MULTICHOICE: 5,
     BUCKET_FTB: 5,
+    BUCKET_SCENARIO_MCQ: 5,
+    BUCKET_SCENARIO_MULTISELECT: 5,
+    BUCKET_RANKING: 6,
 }
+
+# Every rubric criterion is scored on the same four-level scale (framework
+# document, section 9).
+RUBRIC_ANCHOR_LEVELS = ("0", "1", "2", "3")
 
 
 # --------------------------------------------------------------------------
@@ -140,16 +208,18 @@ def is_legacy_ftb(bucket: str, question: Dict[str, Any]) -> bool:
 
 def answers_by_single_option(bucket: str, question: Dict[str, Any]) -> bool:
     """
-    True for a question answered by one `correct_option_index`: every MCQ, and
-    every option FTB.
+    True for a question answered by one `correct_option_index`: every MCQ
+    (standard or scenario), and every option FTB.
     """
-    return bucket == BUCKET_MCQ or (bucket == BUCKET_FTB and not is_legacy_ftb(bucket, question))
+    return bucket in (BUCKET_MCQ, BUCKET_SCENARIO_MCQ) or (
+        bucket == BUCKET_FTB and not is_legacy_ftb(bucket, question)
+    )
 
 def resolve_bucket(name: str) -> Optional[str]:
     """Accept a bucket name, a short type key, or a question_type const."""
     if not name:
         return None
-    if name in CANONICAL_BUCKETS:
+    if name in ALL_BUCKETS:
         return name
     key = name.strip().lower()
     if key in BUCKET_BY_TYPE_KEY:
@@ -236,7 +306,10 @@ def _rebase_option_indexes(question: Dict[str, Any]) -> None:
     if indexes != list(range(1, len(options) + 1)):
         return
 
-    correct = question.get("correct_option_index")
+    # A ranking question's answer key is `correct_ranking`, an ordered list of
+    # option indexes; every other option question's is `correct_option_index`.
+    key_field = "correct_ranking" if "correct_ranking" in question else "correct_option_index"
+    correct = question.get(key_field)
     raw = correct if isinstance(correct, list) else ([] if correct is None else [correct])
     try:
         keys = [int(v) for v in raw]
@@ -250,9 +323,9 @@ def _rebase_option_indexes(question: Dict[str, Any]) -> None:
     for option in options:
         option["index"] -= 1
     if isinstance(correct, list):
-        question["correct_option_index"] = [k - 1 for k in keys]
+        question[key_field] = [k - 1 for k in keys]
     elif keys:
-        question["correct_option_index"] = keys[0] - 1
+        question[key_field] = keys[0] - 1
 
 
 def _normalize_option_indexes(question: Dict[str, Any], *, rebase: bool = False) -> None:
@@ -342,11 +415,16 @@ def balance_mcq_answer_positions(
     Fresh LLM output only — called once by worker_service.py before the first
     save. Never apply to a stored assessment: reordering options under a client
     that already holds the question would change which option its answer key
-    selects. Multi-Choice and the other types are untouched.
+    selects. Multi-Choice and the other types are untouched, except ranking
+    questions — see `_shuffle_ranking_options`.
     """
     rng = rng or _ANSWER_POSITION_RNG
     buckets = assessment_data.get("questions") or {}
-    for bucket in (BUCKET_MCQ, BUCKET_FTB):
+    for question in buckets.get(BUCKET_RANKING) or []:
+        if isinstance(question, dict):
+            _shuffle_ranking_options(question, rng)
+
+    for bucket in (BUCKET_MCQ, BUCKET_FTB, BUCKET_SCENARIO_MCQ):
         questions = buckets.get(bucket)
         if not isinstance(questions, list):
             continue
@@ -364,6 +442,47 @@ def balance_mcq_answer_positions(
             rng.shuffle(targets)
             for question, target in zip(group, targets):
                 _move_correct_option(question, target, rng)
+
+
+def _shuffle_ranking_options(question: Dict[str, Any], rng: random.Random) -> None:
+    """
+    Present a ranking question's actions in an order that is not its answer.
+
+    A model writing a ranking question tends to list the actions best-first, so
+    the displayed order would give the answer away. The options are shuffled and
+    renumbered 0..n-1, and `correct_ranking` is remapped so it still names the
+    same actions in the same order.
+
+    Only a clean question is touched — options indexed exactly 0..n-1 and a
+    `correct_ranking` that is a permutation of them. Anything else is left as
+    generated so validation reports it.
+    """
+    options = question.get("options")
+    ranking = question.get("correct_ranking")
+    if not isinstance(options, list) or len(options) < 2 or not isinstance(ranking, list):
+        return
+    if not all(isinstance(o, dict) and type(o.get("index")) is int for o in options):
+        return
+    if sorted(o["index"] for o in options) != list(range(len(options))):
+        return
+    if sorted(r for r in ranking if type(r) is int) != list(range(len(options))) \
+            or len(ranking) != len(options):
+        return
+
+    by_index = {o["index"]: o for o in options}
+    best_first = [by_index[i] for i in ranking]
+    shuffled = list(options)
+    # A handful of attempts is plenty to avoid landing on the best-first order.
+    for _ in range(10):
+        rng.shuffle(shuffled)
+        if shuffled != best_first:
+            break
+
+    new_index = {id(o): position for position, o in enumerate(shuffled)}
+    question["correct_ranking"] = [new_index[id(o)] for o in best_first]
+    for position, option in enumerate(shuffled):
+        option["index"] = position
+    question["options"] = shuffled
 
 
 # Spellings accepted for a True/False answer, mapped to the canonical form.
@@ -404,7 +523,9 @@ def normalize_assessment(
     Bring an assessment payload up to the editable model.
 
     Idempotent. Guarantees, on return:
-      * `questions` holds all five canonical buckets, in canonical key order
+      * `questions` holds every bucket of the assessment's layout, in canonical
+        key order — the five standard buckets, or for a scenario assessment the
+        six scenario buckets (see `bucket_layout`)
       * every question has a unique non-empty `question_id`
       * every question has a valid `provenance`
       * every question has the `question_type` const for its bucket
@@ -443,7 +564,7 @@ def normalize_assessment(
     # Rebuild the bucket dict in canonical order, preserving any unexpected
     # extra buckets at the end rather than dropping data on the floor.
     questions: Dict[str, List[Dict[str, Any]]] = {}
-    for bucket in CANONICAL_BUCKETS:
+    for bucket in bucket_layout(raw_questions):
         value = raw_questions.get(bucket)
         questions[bucket] = [q for q in value if isinstance(q, dict)] if isinstance(value, list) else []
     for bucket, value in raw_questions.items():

@@ -21,7 +21,7 @@ from .exporters import generate_pdf, generate_docx
 from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
 from .events import stop_kafka_producer, send_request_event
 from .exporters_csv_v2 import generate_csv_v2, generate_csv_basic
-from .questions import normalize_assessment, question_count
+from .questions import SCENARIO_TYPE_KEYS, normalize_assessment, question_count
 from .validation import ValidationError, validate_assessment, _err
 from .editing import (
     AUDIT_QUESTION_ADDED, AUDIT_QUESTION_EDIT_SAVED,
@@ -95,6 +95,7 @@ class AssessmentType(str, Enum):
     COMPREHENSIVE = "comprehensive"
     STANDALONE = "standalone"
     COMPETENCY = "competency"
+    SCENARIO = "scenario"
 
 class Difficulty(str, Enum):
     BEGINNER = "beginner"
@@ -122,6 +123,27 @@ class QuestionType(str, Enum):
     MULTICHOICE = "multichoice"
     TRUE_FALSE = "truefalse"
 
+
+def _split_form_list(values: Optional[List[str]]) -> List[str]:
+    """
+    A list form field sent as repeated fields, comma-separated values, or a
+    JSON array string — stripped, blanks dropped, order kept.
+    """
+    out: List[str] = []
+    for item in values or []:
+        text = (item or "").strip()
+        parts: List[Any] = []
+        if text.startswith("["):
+            try:
+                loaded = json.loads(text)
+                parts = loaded if isinstance(loaded, list) else [text]
+            except json.JSONDecodeError:
+                parts = text.split(",")
+        else:
+            parts = text.split(",")
+        out.extend(str(p).strip() for p in parts if str(p).strip())
+    return out
+
 # ==========================================
 # API V1 Router
 # ==========================================
@@ -141,7 +163,8 @@ async def generate_v1(
     total_questions: int = Form(5),
     question_type_counts: str = Form(
         '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}',
-        description='JSON: mcq, ftb, mtf, multichoice, truefalse counts. Example: mcq=5, ftb=5, mtf=5, multichoice=5, truefalse=5'
+        description='JSON: mcq, ftb, mtf, multichoice, truefalse counts. Example: mcq=5, ftb=5, mtf=5, multichoice=5, truefalse=5. '
+                    'For assessment_type=scenario use scenario_mcq, scenario_multiselect, open_text, sjt_ranking, action_planning, short_answer instead.'
     ),
     time_limit: Optional[int] = Form(None),
     topic_names: Optional[str] = Form(""),
@@ -157,6 +180,9 @@ async def generate_v1(
     competency_themes: Optional[List[str]] = Form(None, description="Competency themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     competency_sub_themes: Optional[List[str]] = Form(None, description="Competency sub-themes (required for competency type). Pass as repeated fields or a single comma-separated value."),
     additional_instructions: Optional[str] = Form(""),
+    assessment_topic: Optional[str] = Form(None, description="Overall subject of a scenario assessment (required for scenario type). e.g. 'Leadership and conflict management'"),
+    scenario_domains: Optional[List[str]] = Form(None, description="Scenario domains/topics (required for scenario type, at least one). Pass as repeated fields, a comma-separated value or a JSON array."),
+    target_audience: Optional[str] = Form(None, description="Who the scenario questions are for — learner group, role, experience or background (required for scenario type). e.g. 'New district officers'"),
     files: Optional[List[UploadFile]] = File(None, description="Supporting documents (.pdf, .docx). Always treated as document content."),
     transcript_files: Optional[List[UploadFile]] = File(None, description="Transcripts (.vtt, .txt, .pdf, .docx). Always treated as transcript content.")
 ):
@@ -178,7 +204,20 @@ async def generate_v1(
     if topic_names in ["string", ""]: topic_names = None
     if blooms_config in ["string", ""]: blooms_config = None
     if additional_instructions in ["string", ""]: additional_instructions = None
-    
+    if assessment_topic in ["string", ""]: assessment_topic = None
+    if target_audience in ["string", ""]: target_audience = None
+    assessment_topic = assessment_topic.strip() if assessment_topic else None
+    target_audience = target_audience.strip() if target_audience else None
+    parsed_scenario_domains = [d for d in _split_form_list(scenario_domains) if d != "string"]
+
+    is_scenario = assessment_type == AssessmentType.SCENARIO
+    if is_scenario:
+        # A scenario assessment carries no Bloom's level — difficulty is
+        # defined by the reasoning required. Fixed here, before the cache key is
+        # built, so what the client sent for these cannot split the cache.
+        blooms_config = None
+        enable_blooms = False
+
     c_ids = []
     if course_ids:
         for item in course_ids:
@@ -194,21 +233,39 @@ async def generate_v1(
         for item in competency_sub_themes:
             parsed_competency_sub_themes.extend([s.strip() for s in item.split(",") if s.strip()])
 
-    if assessment_type == AssessmentType.COMPETENCY:
+    if is_scenario:
+        # Generated from the topic, domains and audience, optionally grounded
+        # in uploaded files — never from courses.
+        missing = [name for name, value in (("assessment_topic", assessment_topic),
+                                            ("scenario_domains", parsed_scenario_domains),
+                                            ("target_audience", target_audience)) if not value]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"{', '.join(missing)} required for scenario assessment type.")
+    elif assessment_type == AssessmentType.COMPETENCY:
         if not competency_area or not parsed_competency_themes or not parsed_competency_sub_themes:
             raise HTTPException(status_code=400, detail="competency_area, competency_themes, and competency_sub_themes are required for competency assessment type.")
         # competency type can work purely from KCM descriptions — no course_ids or files required
     elif not c_ids and not valid_files and not valid_transcripts:
         raise HTTPException(status_code=400, detail="Must provide either Course ID(s) or Uploaded Files.")
 
-    valid_types = {t.value for t in QuestionType}
+    # A scenario assessment uses only the scenario question types, and every
+    # other assessment type only the standard five.
+    valid_types = set(SCENARIO_TYPE_KEYS) if is_scenario else {t.value for t in QuestionType}
 
     q_counts: Dict[str, int] = json.loads(question_type_counts)
     q_types = list(q_counts.keys())
-    
+
     for qtype, count in q_counts.items():
         if qtype not in valid_types:
             raise HTTPException(400, f"Unknown question type: {qtype}")
+
+    if is_scenario:
+        if any(type(count) is not int or count < 0 for count in q_counts.values()):
+            raise HTTPException(400, "Question counts must be non-negative whole numbers.")
+        if sum(q_counts.values()) < 1:
+            raise HTTPException(400, "At least one question must be requested.")
+        # The counts are what gets generated; the stored total follows them.
+        total_questions = sum(q_counts.values())
 
     t_names = [t.strip() for t in topic_names.split(",")] if topic_names else None
     
@@ -241,6 +298,11 @@ async def generate_v1(
             str(competency_area), str(sorted(parsed_competency_themes)),
             str(sorted(parsed_competency_sub_themes)),
         ])
+    # Likewise a scenario assessment differs by its topic, domains and audience.
+    if is_scenario:
+        param_list.extend([
+            str(assessment_topic), str(sorted(parsed_scenario_domains)), str(target_audience),
+        ])
 
     param_str = "_".join(param_list)
     param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
@@ -248,6 +310,8 @@ async def generate_v1(
     if c_ids:
         sorted_ids = sorted(c_ids)
         base_id = f"comprehensive_{'_'.join(sorted_ids)}" if len(sorted_ids) > 1 else sorted_ids[0]
+    elif is_scenario:
+        base_id = "scenario"
     else:
         base_id = "custom_upload"
         
@@ -328,6 +392,12 @@ async def generate_v1(
             "additional_instructions": additional_instructions,
         }
     }
+    scenario_fields = {
+        "assessment_topic": assessment_topic,
+        "scenario_domains": parsed_scenario_domains,
+        "target_audience": target_audience,
+    } if is_scenario else {}
+    initial_metadata["config"].update(scenario_fields)
     await create_job(user_job_id, user_id=user_id, metadata=initial_metadata)
     logger.info(f"[{user_job_id}] Job created in DB with status PENDING")
 
@@ -367,6 +437,7 @@ async def generate_v1(
         "competency_area": competency_area,
         "competency_themes": parsed_competency_themes,
         "competency_sub_themes": parsed_competency_sub_themes,
+        **scenario_fields,
         # Pre-built config dict — worker reuses this verbatim as the DB-stored config
         "config": initial_metadata["config"],
     }
@@ -479,7 +550,9 @@ class QuestionEditRequest(BaseModel):
 class QuestionAddBody(_EnvelopeBody):
     question_type: str = Field(
         ..., alias="questionType",
-        description="mcq | ftb | mtf | multichoice | truefalse",
+        description="mcq | ftb | mtf | multichoice | truefalse — or, on a scenario "
+                    "assessment, scenario_mcq | scenario_multiselect | open_text | "
+                    "sjt_ranking | action_planning | short_answer",
     )
     question: Dict[str, object] = Field(
         ..., description="The authored question — text, options, correct answer, "

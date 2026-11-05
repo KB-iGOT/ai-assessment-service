@@ -56,6 +56,11 @@ GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 # that decision, as it did before batching existed.
 QUESTION_BATCH_SIZE = int(os.getenv("QUESTION_BATCH_SIZE", "25"))
 
+# Batch size for scenario assessments, kept separate from QUESTION_BATCH_SIZE so
+# it can be tuned on its own: a scenario question carries a scenario, an answer
+# key or reference answer and, for the written types, a full rubric.
+SCENARIO_BATCH_SIZE = int(os.getenv("SCENARIO_BATCH_SIZE", "25"))
+
 # Attempts per batch before the run stops. One job is now several calls, so a
 # single bad response must not lose the whole assessment.
 BATCH_MAX_ATTEMPTS = int(os.getenv("BATCH_MAX_ATTEMPTS", "2"))
