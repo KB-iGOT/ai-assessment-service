@@ -617,6 +617,9 @@ scenario_prompt_template: |
     from leaving"). Write each wrong option the way someone who chose it
     would describe it.
   - The correct option must NOT be the longest or most detailed option.
+  - All options, including the correct option, must be similar in length - 
+    no option more than 15% longer than the shortest - and in level of detail, 
+    so the correct option is not apparent from its length or specificity.
   - `correct_option_index`: a single integer.
   - `answer_rationale.correct_answer_explanation`: why the correct response is
     the best one in this scenario, citing the scenario's details and the
