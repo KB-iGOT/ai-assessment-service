@@ -29,6 +29,7 @@ kept for a reviewer to fix through the editing endpoints.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
@@ -641,7 +642,6 @@ async def generate_scenario_assessment(
     Generate a scenario assessment. Returns (metadata, assessment, usage), the
     same shape `generator.generate_assessment` returns.
     """
-    job_id = "scenario"
     topic = " ".join(str(request.assessment_topic or "").split())
     audience = " ".join(str(request.target_audience or "").split())
     domains = _clean_list(request.scenario_domains)
@@ -650,6 +650,12 @@ async def generate_scenario_assessment(
             "A scenario assessment needs an assessment topic, a target audience "
             "and at least one scenario domain."
         )
+
+    # Deterministic log key, as the standard path derives one from its course
+    # ids: a scenario request is identified by its topic, domains and audience.
+    job_id = "scenario_" + hashlib.md5(
+        "_".join([topic, str(sorted(domains)), audience]).encode()
+    ).hexdigest()[:8]
 
     wanted = {
         k: v for k, v in requested_counts(request.question_type_counts).items()
