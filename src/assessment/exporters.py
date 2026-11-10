@@ -55,6 +55,11 @@ DISPLAY_LABELS = {
 
 ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+# python-docx paragraph style for bulleted lines.
+LIST_BULLET = "List Bullet"
+
+CLOSE_DIV = "</div>"
+
 
 # --------------------------------------------------------------------------
 # Scenario questions — shared by the PDF and DOCX exports
@@ -86,7 +91,10 @@ def _scenario_answer_lines(bucket: str, q: Dict[str, Any]) -> List[str]:
     letters = _option_letter_by_index(options)
 
     def letters_for(values: Any) -> List[str]:
-        values = values if isinstance(values, list) else ([] if values is None else [values])
+        if values is None:
+            values = []
+        elif not isinstance(values, list):
+            values = [values]
         out = []
         for value in values:
             try:
@@ -132,7 +140,7 @@ def _scenario_question_html(number: int, bucket: str, q: Dict[str, Any]) -> str:
     if parts["constraints"]:
         out.append("<br/><i>Constraints:</i><ul>"
                    + "".join(f"<li>{e(c)}</li>" for c in parts["constraints"]) + "</ul>")
-    out.append("</div>")
+    out.append(CLOSE_DIV)
     out.append(f"<div class='question-text'>Q{number}: {e(q.get('question_text'))}</div>")
 
     options = q.get("options") or []
@@ -172,8 +180,8 @@ def _scenario_question_html(number: int, bucket: str, q: Dict[str, Any]) -> str:
         f"<b>Scenario Domain:</b> {e(q.get('scenario_domain') or 'N/A')}",
         f"<b>Provenance:</b> {e(provenance)}",
     ]
-    out.append("<div class='reasoning-box'>" + "<br/>".join(box) + "</div>")
-    out.append("</div>")
+    out.append("<div class='reasoning-box'>" + "<br/>".join(box) + CLOSE_DIV)
+    out.append(CLOSE_DIV)
     return "\n".join(out)
 
 
@@ -186,12 +194,12 @@ def _add_scenario_question_docx(doc, number: int, bucket: str, q: Dict[str, Any]
     if parts["constraints"]:
         doc.add_paragraph().add_run("Constraints:").italic = True
         for constraint in parts["constraints"]:
-            doc.add_paragraph(constraint, style='List Bullet')
+            doc.add_paragraph(constraint, style=LIST_BULLET)
 
     doc.add_paragraph().add_run(f"{number}. {q.get('question_text') or 'N/A'}").bold = True
 
     for i, option in enumerate((q.get("options") or [])[:len(ALPHA)]):
-        doc.add_paragraph(f"{ALPHA[i]}. {option.get('text', '')}", style='List Bullet')
+        doc.add_paragraph(f"{ALPHA[i]}. {option.get('text', '')}", style=LIST_BULLET)
     for line in _scenario_answer_lines(bucket, q):
         doc.add_paragraph().add_run(line).bold = True
     answer_list = _scenario_answer_list(bucket, q)
@@ -199,7 +207,7 @@ def _add_scenario_question_docx(doc, number: int, bucket: str, q: Dict[str, Any]
         heading, items = answer_list
         doc.add_paragraph().add_run(f"{heading}:").bold = True
         for item in items:
-            doc.add_paragraph(item, style='List Bullet')
+            doc.add_paragraph(item, style=LIST_BULLET)
 
     rubric = _rubric_rows(q) if bucket in RUBRIC_BUCKETS else []
     if rubric:
@@ -465,7 +473,7 @@ def generate_docx(assessment_data: dict, output_path: Path):
         if answers_by_single_option(q_type, q):
             options = q.get("options", [])
             for i, opt in enumerate(options):
-                doc.add_paragraph(f"{ALPHA[i]}. {opt.get('text', '')}", style='List Bullet')
+                doc.add_paragraph(f"{ALPHA[i]}. {opt.get('text', '')}", style=LIST_BULLET)
             correct_idx = q.get('correct_option_index')
             correct_set = {int(correct_idx)} if correct_idx is not None else set()
             correct_labels = [
@@ -477,12 +485,12 @@ def generate_docx(assessment_data: dict, output_path: Path):
 
         elif q_type == "MTF Question":
             for i, p_item in enumerate(q.get("pairs", [])):
-                doc.add_paragraph(f"{ALPHA[i]}. {p_item.get('left')} -> {p_item.get('right')}", style='List Bullet')
+                doc.add_paragraph(f"{ALPHA[i]}. {p_item.get('left')} -> {p_item.get('right')}", style=LIST_BULLET)
 
         elif q_type == "Multi-Choice Question":
             options = q.get("options", [])
             for i, opt in enumerate(options):
-                doc.add_paragraph(f"{ALPHA[i]}. {opt.get('text', '')}", style='List Bullet')
+                doc.add_paragraph(f"{ALPHA[i]}. {opt.get('text', '')}", style=LIST_BULLET)
             corr = q.get('correct_option_index')
             correct_set = {int(x) for x in corr} if isinstance(corr, list) else ({int(corr)} if corr is not None else set())
             correct_labels = [
@@ -493,8 +501,8 @@ def generate_docx(assessment_data: dict, output_path: Path):
             p.add_run(f"Correct Options: {', '.join(correct_labels) if correct_labels else 'N/A'}").bold = True
 
         elif q_type == "True/False Question":
-            doc.add_paragraph("A. True", style='List Bullet')
-            doc.add_paragraph("B. False", style='List Bullet')
+            doc.add_paragraph("A. True", style=LIST_BULLET)
+            doc.add_paragraph("B. False", style=LIST_BULLET)
             p = doc.add_paragraph()
             p.add_run(f"Correct Answer: {q.get('correct_answer')}").bold = True
 

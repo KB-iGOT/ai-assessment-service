@@ -79,20 +79,158 @@ def _has_option_rows(q: Dict[str, Any], q_type: str) -> bool:
     )
 
 
-def _slot_count_v2(q: Dict[str, Any], q_type: str) -> int:
-    """How many Option/isOptionCorrect columns this question needs."""
-    if _has_option_rows(q, q_type) or q_type == "RANK":
-        return len(q.get("options", []) or [])
+# --------------------------------------------------------------------------
+# Option slots
+# --------------------------------------------------------------------------
+# Each question fills the OptionN / isOptionNCorrect columns from a list of
+# (Option, isOptionCorrect) pairs, one pair per slot, built per type below.
+
+# Every CSV row has at least this many option slots.
+MIN_OPTION_SLOTS = 7
+
+DEFAULT_MTF_CONTEXT = "Match the following items appropriately:"
+
+# Request / model difficulty -> the QuestionTagging value. Anything else is Medium.
+DIFFICULTY_TAGS = {
+    "beginner": "Easy", "easy": "Easy",
+    "medium": "Medium", "intermediate": "Medium",
+    "hard": "Difficult", "difficult": "Difficult", "advanced": "Difficult",
+}
+
+
+def _option_index(option: Dict[str, Any], position: int) -> int:
+    """
+    The option's own `index`. `normalize_assessment` guarantees it is present;
+    the fallback is zero-based to match the documented convention and the
+    PDF/DOCX exporters — it used to be one-based here, which could mark a
+    different option correct in CSV than in the other formats.
+    """
+    return int(option["index"]) if option.get("index") is not None else position
+
+
+def _correct_indexes(correct_idx: Any) -> set:
+    """`correct_option_index` — one int (SCA) or a list (MCA) — as a set."""
+    if isinstance(correct_idx, list):
+        return {int(x) for x in correct_idx}
+    if correct_idx is not None:
+        return {int(correct_idx)}
+    return set()
+
+
+def _choice_slots(q: Dict[str, Any]) -> List[tuple]:
+    """MCQs and option FTBs: each option, `Yes` when it is correct, else `No`."""
+    correct = _correct_indexes(q.get("correct_option_index"))
+    return [
+        (opt.get("text", ""), "Yes" if _option_index(opt, i) in correct else "No")
+        for i, opt in enumerate(q.get("options", []))
+    ]
+
+
+def _ranking_slots(q: Dict[str, Any]) -> List[tuple]:
+    """Each action, with its place in the correct ranking (1 = most effective)."""
+    rank_of = {}
+    for position, index in enumerate(q.get("correct_ranking") or [], start=1):
+        try:
+            rank_of[int(index)] = position
+        except (TypeError, ValueError):
+            continue
+    return [
+        (opt.get("text", ""), rank_of.get(_option_index(opt, i), ""))
+        for i, opt in enumerate(q.get("options") or [])
+    ]
+
+
+def _true_false_slots(q: Dict[str, Any]) -> List[tuple]:
+    """Fixed options TRUE / FALSE."""
+    answer = str(q.get("correct_answer", "")).lower()
+    return [
+        ("TRUE", "Yes" if answer == "true" else "No"),
+        ("FALSE", "Yes" if answer == "false" else "No"),
+    ]
+
+
+def _matching_slots(q: Dict[str, Any]) -> List[tuple]:
+    """Each pair: left in OptionN, right in isOptionNCorrect."""
+    return [(pair.get("left", ""), pair.get("right", "")) for pair in q.get("pairs", [])]
+
+
+def _legacy_blank_slots(q: Dict[str, Any]) -> List[tuple]:
+    """
+    A legacy FTB's answers, tagged BlankN. `correct_answer` is one string, a
+    list, or a {"blank1": ..., "blank2": ...} dict.
+    """
+    answer = q.get("correct_answer")
+    if isinstance(answer, dict):
+        answer = list(answer.values())
+    if not isinstance(answer, list):
+        return [(str(answer), "Blank1")]
+    return [(value, f"Blank{n}") for n, value in enumerate(answer, start=1)]
+
+
+def _option_slots(q: Dict[str, Any], q_type: str) -> List[tuple]:
+    """The (Option, isOptionCorrect) pair for each slot this question fills."""
+    if _has_option_rows(q, q_type):
+        return _choice_slots(q)
+    if q_type == "RANK":
+        return _ranking_slots(q)
     if q_type in ("OPEN", "SA", "PLAN"):
-        return len(_answer_rows(q, q_type))
+        return _answer_rows(q, q_type)
+    if q_type == "T/F":
+        return _true_false_slots(q)
     if q_type == "MTF":
-        return len(q.get("pairs", []) or [])
+        return _matching_slots(q)
     if q_type == "FTB":
-        correct_ans = q.get("correct_answer")
-        if isinstance(correct_ans, (dict, list)):
-            return len(correct_ans)
-        return 1
-    return 0  # T/F is fixed at 2, already covered by the floor below
+        return _legacy_blank_slots(q)
+    return []
+
+
+# --------------------------------------------------------------------------
+# Rows
+# --------------------------------------------------------------------------
+
+def _question_cell(q: Dict[str, Any], q_type: str) -> Any:
+    """
+    The Question cell. An MTF has no question text of its own, so it carries
+    the matching context; an FTB's blanks are written `<blank>`; a scenario
+    question starts with its scenario.
+    """
+    if q_type == "MTF":
+        return q.get("matching_context", DEFAULT_MTF_CONTEXT)
+    if isinstance(q.get("scenario"), dict):
+        return scenario_question_text(q)
+    text = q.get("question_text", "")
+    if q_type == "FTB":
+        text = re.sub(r'_{2,}', '<blank>', text)
+    return text
+
+
+def _question_tagging(q: Dict[str, Any]) -> str:
+    return DIFFICULTY_TAGS.get(str(q.get("difficulty_level", "")).lower(), "Medium")
+
+
+def _csv_v2_row(
+    number: int,
+    bucket: str,
+    q: Dict[str, Any],
+    q_type: str,
+    slots: List[tuple],
+    max_slots: int,
+    has_rubrics: bool,
+) -> Dict[str, Any]:
+    row = {
+        "QuestionNo": number,
+        "QuestionType": q_type,
+        "Question": _question_cell(q, q_type),
+        "QuestionTagging": _question_tagging(q),
+    }
+    padded = slots[:max_slots] + [("", "")] * (max_slots - len(slots))
+    for i, (option, correct) in enumerate(padded, start=1):
+        row[f"Option{i}"] = option
+        row[f"isOption{i}Correct"] = correct
+    if has_rubrics:
+        rubric = q.get("rubric") if bucket in RUBRIC_BUCKETS else None
+        row[RUBRIC_COLUMN] = json.dumps(rubric, ensure_ascii=False) if rubric else ""
+    return row
 
 
 def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
@@ -115,153 +253,25 @@ def generate_csv_v2(assessment_data: Dict[str, Any], output_path: Path):
 
     # Flatten in the assessment's authoritative sequence, so the row order here
     # matches the PDF, DOCX and JSON exports.
-    all_questions = [
-        {
-            "raw": q,
-            "bucket": bucket,
-            "type": CSV_TYPE_BY_BUCKET.get(bucket, bucket),
-            "complexity": q.get('reasoning', {}).get('complexity_level', 'Easy'),
-        }
-        for bucket, q in iter_questions_in_order(assessment_data)
-    ]
+    questions = []
+    for bucket, q in iter_questions_in_order(assessment_data):
+        q_type = CSV_TYPE_BY_BUCKET.get(bucket, bucket)
+        questions.append((bucket, q, q_type, _option_slots(q, q_type)))
 
-    max_slots = max([7] + [_slot_count_v2(item["raw"], item["type"]) for item in all_questions])
-    has_rubrics = any(item["bucket"] in RUBRIC_BUCKETS for item in all_questions)
+    # Wide enough for whichever question fills the most slots.
+    max_slots = max([MIN_OPTION_SLOTS] + [len(slots) for *_, slots in questions])
+    has_rubrics = any(bucket in RUBRIC_BUCKETS for bucket, *_ in questions)
 
-    # Define Header
     headers = ["QuestionNo", "QuestionType", "Question", "QuestionTagging"]
     for i in range(1, max_slots + 1):
         headers.extend([f"Option{i}", f"isOption{i}Correct"])
     if has_rubrics:
         headers.append(RUBRIC_COLUMN)
 
-    rows = []
-    q_counter = 1
-
-    for item in all_questions:
-        q = item["raw"]
-        q_type = item["type"]
-        difficulty_map = {"beginner": "Easy", "easy": "Easy", "medium": "Medium", "intermediate": "Medium", "hard": "Difficult", "difficult": "Difficult", "advanced": "Difficult"}
-        raw_diff = str(q.get("difficulty_level", "")).lower()
-        tagging = difficulty_map.get(raw_diff, "Medium")
-        
-        default_q_txt = "" 
-        if q_type == "MTF":
-            # Extract Matching Context and Prepend it
-            context = q.get("matching_context", "Match the following items appropriately:")
-            default_q_txt = f"{context}\n\n" if context else "Match the following items appropriately:\n\n"
-        
-        q_text = q.get("question_text", default_q_txt)
-        if q_type == "FTB":
-            q_text = re.sub(r'_{2,}', '<blank>', q_text)
-        if isinstance(q.get("scenario"), dict):
-            q_text = scenario_question_text(q)
-
-        row = {
-            "QuestionNo": q_counter,
-            "QuestionType": q_type,
-            "Question": q_text,
-            "QuestionTagging": tagging,
-        }
-        
-        # Override the MTF string to only contain the context since it lacks a QuestionText itself
-        if q_type == "MTF":
-           row["Question"] = q.get("matching_context", "Match the following items appropriately:")
-        
-        # Populate Options columns (Default empty)
-        for i in range(1, max_slots + 1):
-            row[f"Option{i}"] = ""
-            row[f"isOption{i}Correct"] = ""
-        if has_rubrics:
-            rubric = q.get("rubric") if item["bucket"] in RUBRIC_BUCKETS else None
-            row[RUBRIC_COLUMN] = json.dumps(rubric, ensure_ascii=False) if rubric else ""
-
-        # Logic per Type
-        if _has_option_rows(q, q_type):
-            options = q.get("options", [])
-            correct_idx = q.get("correct_option_index")
-            # correct_idx could be int (SCA) or list of ints (MCA) return 1-based index usually? 
-            # Internal schema is 0-indexed or 1-indexed? Usually 0-indexed lists.
-            # Example provided: Option1..Option7.
-            
-            # Normalize correct_idx to set
-            correct_set = set()
-            if isinstance(correct_idx, list):
-                correct_set = {int(x) for x in correct_idx}
-            elif correct_idx is not None:
-                correct_set = {int(correct_idx)}
-                
-            for i, opt in enumerate(options[:max_slots]):
-                col_idx = i + 1
-                row[f"Option{col_idx}"] = opt.get("text", "")
-                # Match using the option's own index field. `normalize_assessment`
-                # guarantees it is present; the fallback is zero-based to match
-                # the documented convention and the PDF/DOCX exporters — it used
-                # to be one-based here, which could mark a different option
-                # correct in CSV than in the other formats.
-                opt_index = int(opt["index"]) if opt.get("index") is not None else i
-                is_correct = "Yes" if opt_index in correct_set else "No"
-                row[f"isOption{col_idx}Correct"] = is_correct
-
-        elif q_type == "RANK":
-            # Each action, with its place in the correct ranking (1 = most effective).
-            rank_of = {}
-            for position, index in enumerate(q.get("correct_ranking") or [], start=1):
-                try:
-                    rank_of[int(index)] = position
-                except (TypeError, ValueError):
-                    continue
-            for i, opt in enumerate((q.get("options") or [])[:max_slots]):
-                col_idx = i + 1
-                opt_index = int(opt["index"]) if opt.get("index") is not None else i
-                row[f"Option{col_idx}"] = opt.get("text", "")
-                row[f"isOption{col_idx}Correct"] = rank_of.get(opt_index, "")
-
-        elif q_type in ("OPEN", "SA", "PLAN"):
-            for i, (text, tag) in enumerate(_answer_rows(q, q_type)[:max_slots]):
-                col_idx = i + 1
-                row[f"Option{col_idx}"] = text
-                row[f"isOption{col_idx}Correct"] = tag
-
-        elif q_type == "T/F":
-            # Fixed Options: TRUE / FALSE
-            row["Option1"] = "TRUE"
-            row["Option2"] = "FALSE"
-            
-            correct_ans = str(q.get("correct_answer", "")).lower()
-            row["isOption1Correct"] = "Yes" if correct_ans == "true" else "No"
-            row["isOption2Correct"] = "Yes" if correct_ans == "false" else "No"
-
-        elif q_type == "MTF":
-            # Map Pairs: Left -> OptionN, Right -> isOptionNCorrect
-            pairs = q.get("pairs", [])
-            for i, pair in enumerate(pairs[:max_slots]):
-                col_idx = i + 1
-                row[f"Option{col_idx}"] = pair.get("left", "")
-                row[f"isOption{col_idx}Correct"] = pair.get("right", "")
-
-        elif q_type == "FTB":
-            correct_ans = q.get("correct_answer") # Could be string or list/dict
-            if isinstance(correct_ans, dict):
-                 # {"blank1": "val", "blank2": "val"}
-                 for i, (k, v) in enumerate(correct_ans.items()):
-                     if i >= max_slots: break
-                     col_idx = i + 1
-                     row[f"Option{col_idx}"] = v
-                     row[f"isOption{col_idx}Correct"] = f"Blank{col_idx}"
-            elif isinstance(correct_ans, list):
-                for i, v in enumerate(correct_ans):
-                    if i >= max_slots: break
-                    col_idx = i + 1
-                    row[f"Option{col_idx}"] = v
-                    row[f"isOption{col_idx}Correct"] = f"Blank{col_idx}"
-            else:
-                 # Single string?
-                 row["Option1"] = str(correct_ans)
-                 row["isOption1Correct"] = "Blank1"
-
-        rows.append(row)
-        q_counter += 1
+    rows = [
+        _csv_v2_row(number, bucket, q, q_type, slots, max_slots, has_rubrics)
+        for number, (bucket, q, q_type, slots) in enumerate(questions, start=1)
+    ]
 
     # Write CSV. utf-8-sig so Excel shows non-ASCII text (dashes, curly
     # quotes, Hindi) correctly instead of guessing the ANSI codepage.
@@ -288,7 +298,7 @@ def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
                       BUCKET_SCENARIO_MCQ, BUCKET_SCENARIO_MULTISELECT)
     ]
 
-    max_options = max([7] + [len(item["raw"].get("options", []) or []) for item in all_questions])
+    max_options = max([MIN_OPTION_SLOTS] + [len(item["raw"].get("options", []) or []) for item in all_questions])
 
     headers = ["SR", "Question"]
     for i in range(1, max_options + 1):
@@ -310,18 +320,12 @@ def generate_csv_basic(assessment_data: Dict[str, Any], output_path: Path):
             row[f"IsOption{i}Correct"] = ""
 
         options = q.get("options", [])
-        correct_idx = q.get("correct_option_index")
-        correct_set = set()
-        if isinstance(correct_idx, list):
-            correct_set = {int(x) for x in correct_idx}
-        elif correct_idx is not None:
-            correct_set = {int(correct_idx)}
+        correct_set = _correct_indexes(q.get("correct_option_index"))
 
         for i, opt in enumerate(options[:max_options]):
             col_idx = i + 1
             row[f"Option{col_idx}"] = opt.get("text", "")
-            opt_index = int(opt["index"]) if opt.get("index") is not None else i
-            row[f"IsOption{col_idx}Correct"] = "TRUE" if opt_index in correct_set else "FALSE"
+            row[f"IsOption{col_idx}Correct"] = "TRUE" if _option_index(opt, i) in correct_set else "FALSE"
 
         rows.append(row)
         q_counter += 1

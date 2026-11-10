@@ -52,6 +52,9 @@ from .questions import (
 # Minimum number of left/right pairs for a Match-the-Following question.
 MIN_MTF_PAIRS = 2
 
+# Path of the explanation every question must carry.
+RATIONALE_FIELD = "answer_rationale.correct_answer_explanation"
+
 # --------------------------------------------------------------------------
 # Editable field allowlist
 # --------------------------------------------------------------------------
@@ -62,7 +65,7 @@ MIN_MTF_PAIRS = 2
 # it is out of scope for this release.
 
 _COMMON_EDITABLE = {
-    "answer_rationale.correct_answer_explanation",
+    RATIONALE_FIELD,
     "answer_rationale.why_factor",
     "answer_rationale.logic_justification",
     "blooms_level",
@@ -118,7 +121,7 @@ _SCENARIO_COMMON_EDITABLE = {
     "scenario.constraints",
     "scenario_domain",
     "difficulty_level",
-    "answer_rationale.correct_answer_explanation",
+    RATIONALE_FIELD,
 }
 
 _SCENARIO_OPTION_EDITABLE = _SCENARIO_COMMON_EDITABLE | {
@@ -291,9 +294,8 @@ def validate_question(
         errors.extend(_validate_pairs(question, qid))
 
     # --- rationale -----------------------------------------------------
-    if _is_blank(get_path(question, "answer_rationale.correct_answer_explanation")):
-        errors.append(_err("rationale_required",
-                           "answer_rationale.correct_answer_explanation", qid))
+    if _is_blank(get_path(question, RATIONALE_FIELD)):
+        errors.append(_err("rationale_required", RATIONALE_FIELD, qid))
 
     # --- Bloom's level ---------------------------------------------
     blooms = question.get("blooms_level")
@@ -469,9 +471,8 @@ def validate_scenario_question(bucket: str, question: Dict[str, Any]) -> List[Di
     if bucket in RUBRIC_BUCKETS:
         errors.extend(validate_rubric(question.get("rubric"), qid))
 
-    if _is_blank(get_path(question, "answer_rationale.correct_answer_explanation")):
-        errors.append(_err("rationale_required",
-                           "answer_rationale.correct_answer_explanation", qid))
+    if _is_blank(get_path(question, RATIONALE_FIELD)):
+        errors.append(_err("rationale_required", RATIONALE_FIELD, qid))
 
     if question.get("provenance") not in VALID_PROVENANCE:
         errors.append(_err("provenance_invalid", "provenance", qid,

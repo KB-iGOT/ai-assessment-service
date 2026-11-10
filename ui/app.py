@@ -29,6 +29,13 @@ API_V1 = f"{API_BASE}/ai-assessments/v1"
 PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
+# Text shared by the three generate forms and the question editors.
+QUESTION_COUNTS_HEADING = "#### Question Counts"
+AUTH_TOKEN_MISSING = "Please enter an Auth Token in the sidebar first."
+POLL_STATUS_HINT = "Go to 'View & Edit Result' tab to poll status."
+LABEL_SCENARIO_DOMAIN = "Scenario domain"
+LABEL_DIFFICULTY_LEVEL = "Difficulty level"
+
 st.set_page_config(page_title="Assessment Generator (Interactive)", layout="wide", page_icon="🧩")
 
 # --- Sidebar: Auth & Config ---
@@ -136,7 +143,7 @@ with tab_gen:
                 ["english", "hindi", "bengali", "gujarati", "kannada", "malayalam", "marathi", "tamil", "telugu", "odia", "punjabi", "assamese"]
             )
             
-        st.markdown("#### Question Counts")
+        st.markdown(QUESTION_COUNTS_HEADING)
         c1, c2, c3, c4, c5 = st.columns(5)
         mcq = c1.number_input("MCQ", 0, 20, 5)
         ftb = c2.number_input("FTB", 0, 20, 5)
@@ -194,7 +201,7 @@ with tab_gen:
 
     if st.button("Start Generation", type="primary"):
         if not auth_token:
-            st.error("Please enter an Auth Token in the sidebar first.")
+            st.error(AUTH_TOKEN_MISSING)
             st.stop()
             
         # Construct Payload
@@ -259,7 +266,7 @@ with tab_gen:
                         st.balloons()
                     else: # 202
                         st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
-                        st.info("Go to 'View & Edit Result' tab to poll status.")
+                        st.info(POLL_STATUS_HINT)
                 else:
                     st.error(f"API Error ({r.status_code}): {r.text}")
                     
@@ -373,7 +380,7 @@ with tab_comp:
             "Create": cb_cre
         }
         
-    st.markdown("#### Question Counts")
+    st.markdown(QUESTION_COUNTS_HEADING)
     c1, c2, c3, c4, c5 = st.columns(5)
     cmcq = c1.number_input("MCQ", 0, 50, 10, key="cmcq")
     cftb = c2.number_input("FTB", 0, 50, 0, key="cftb")
@@ -385,7 +392,7 @@ with tab_comp:
 
     if st.button("Generate Comprehensive", type="primary"):
         if not auth_token:
-            st.error("Please enter an Auth Token in the sidebar first.")
+            st.error(AUTH_TOKEN_MISSING)
             st.stop()
 
         valid_courses = [c for c in course_data if c["id"].strip()]
@@ -428,7 +435,7 @@ with tab_comp:
                         st.balloons()
                     else:
                         st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
-                        st.info("Go to 'View & Edit Result' tab to poll status.")
+                        st.info(POLL_STATUS_HINT)
                 else:
                     st.error(f"API Error ({r.status_code}): {r.text}")
             except Exception as e:
@@ -473,7 +480,7 @@ with tab_scen:
     st.caption("Bloom's taxonomy does not apply — difficulty is defined by the reasoning "
                "and judgment required.")
 
-    st.markdown("#### Question Counts")
+    st.markdown(QUESTION_COUNTS_HEADING)
     sc_cols = st.columns(len(SCENARIO_TYPE_CHOICES))
     sc_counts = {
         key: col.number_input(label, 0, 200, 2 if key in ("scenario_mcq", "open_text") else 0,
@@ -491,7 +498,7 @@ with tab_scen:
 
     if st.button("Generate Scenario Assessment", type="primary"):
         if not auth_token:
-            st.error("Please enter an Auth Token in the sidebar first.")
+            st.error(AUTH_TOKEN_MISSING)
             st.stop()
         # Checked again by the API; caught here so the user does not wait for a 400.
         missing = [name for name, value in (("Assessment topic", sc_topic),
@@ -546,7 +553,7 @@ with tab_scen:
                         st.success(f"⚡ Instant Result! (Cache Hit/Cloned). Job ID: {data.get('job_id')}")
                     else:
                         st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
-                        st.info("Go to 'View & Edit Result' tab to poll status.")
+                        st.info(POLL_STATUS_HINT)
                 else:
                     st.error(f"API Error ({r.status_code}): {r.text}")
             except Exception as e:
@@ -823,11 +830,11 @@ with tab_view:
                                                        key="sc_add_cons")
                             sd1, sd2 = st.columns(2)
                             if _sc_domains:
-                                sc_new_domain = sd1.selectbox("Scenario domain", _sc_domains,
+                                sc_new_domain = sd1.selectbox(LABEL_SCENARIO_DOMAIN, _sc_domains,
                                                               key="sc_add_domain")
                             else:
-                                sc_new_domain = sd1.text_input("Scenario domain", key="sc_add_domain")
-                            sc_new_diff = sd2.text_input("Difficulty level",
+                                sc_new_domain = sd1.text_input(LABEL_SCENARIO_DOMAIN, key="sc_add_domain")
+                            sc_new_diff = sd2.text_input(LABEL_DIFFICULTY_LEVEL,
                                                          _sc_cfg.get("difficulty") or "",
                                                          key="sc_add_diff")
 
@@ -964,7 +971,7 @@ with tab_view:
                             ac1, ac2, ac3 = st.columns(3)
                             new_blooms = ac1.selectbox("Bloom's level", BLOOMS, key="add_blooms")
                             new_difficulty = pick(
-                                "Difficulty level", DIFFICULTIES, "", "add_diff", container=ac2,
+                                LABEL_DIFFICULTY_LEVEL, DIFFICULTIES, "", "add_diff", container=ac2,
                                 help="Drives the QuestionTagging column of the CSV export. "
                                      "Left unset, that export falls back to Medium.")
                             new_relevance = ac3.slider("Relevance %", 0, 100, 80, key="add_rel")
@@ -1443,10 +1450,10 @@ with tab_view:
                                 # KCM or course on a scenario question.
                                 sc1, sc2 = st.columns(2)
                                 updates["scenario_domain"] = sc1.text_input(
-                                    "Scenario domain", q.get("scenario_domain", "") or "",
+                                    LABEL_SCENARIO_DOMAIN, q.get("scenario_domain", "") or "",
                                     key=f"sdom_{qkey}")
                                 updates["difficulty_level"] = sc2.text_input(
-                                    "Difficulty level", q.get("difficulty_level", "") or "",
+                                    LABEL_DIFFICULTY_LEVEL, q.get("difficulty_level", "") or "",
                                     key=f"sdf_{qkey}")
 
                             if bucket not in SCENARIO_BUCKETS:
@@ -1456,7 +1463,7 @@ with tab_view:
                                     "Bloom's level", BLOOMS, q.get("blooms_level"),
                                     f"bl_{qkey}", container=bc1)
                                 updates["difficulty_level"] = pick(
-                                    "Difficulty level", DIFFICULTIES, q.get("difficulty_level"),
+                                    LABEL_DIFFICULTY_LEVEL, DIFFICULTIES, q.get("difficulty_level"),
                                     f"df_{qkey}", container=bc2,
                                     help="Drives the QuestionTagging column of the CSV export. "
                                          "Left unset, that export falls back to Medium.")
