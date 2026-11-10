@@ -61,6 +61,15 @@ QUESTION_BATCH_SIZE = int(os.getenv("QUESTION_BATCH_SIZE", "25"))
 # key or reference answer and, for the written types, a full rubric.
 SCENARIO_BATCH_SIZE = int(os.getenv("SCENARIO_BATCH_SIZE", "25"))
 
+# Planned parallel generation for scenario assessments that need more than one
+# batch. One planning call first gives every question a seed (learner, setting,
+# trigger and roles); the batches that write them then run in parallel, up to
+# SCENARIO_BATCH_CONCURRENCY at a time, each handed its own seeds instead of the
+# questions earlier batches produced. On by default: set to "false" to use the
+# sequential path above, which is also the fallback if planning fails.
+SCENARIO_PLANNER_ENABLED = os.getenv("SCENARIO_PLANNER_ENABLED", "true").lower() == "true"
+SCENARIO_BATCH_CONCURRENCY = int(os.getenv("SCENARIO_BATCH_CONCURRENCY", "6"))
+
 # Attempts per batch before the run stops. One job is now several calls, so a
 # single bad response must not lose the whole assessment.
 BATCH_MAX_ATTEMPTS = int(os.getenv("BATCH_MAX_ATTEMPTS", "2"))
@@ -74,12 +83,14 @@ ENABLE_QUESTION_BATCHING = os.getenv("ENABLE_QUESTION_BATCHING", "true").lower()
 # missing. 0 still trims extras to the request but generates nothing further.
 TOPUP_MAX_ROUNDS = int(os.getenv("TOPUP_MAX_ROUNDS", "1"))
 
-# There is deliberately no concurrency bound and no separate batch temperature.
-# Both existed only because batches used to run in parallel: one to keep
-# simultaneous calls under the Vertex quota, the other as the only available
-# knob for diversity between batches that could not see each other. Sequential
-# generation makes exactly one call at a time, and the "already generated" list
-# does the job the temperature was standing in for.
+# The sequential paths have deliberately no concurrency bound and no separate
+# batch temperature. Both existed only because batches used to run in parallel:
+# one to keep simultaneous calls under the Vertex quota, the other as the only
+# available knob for diversity between batches that could not see each other.
+# Sequential generation makes exactly one call at a time, and the "already
+# generated" list does the job the temperature was standing in for. The planned
+# scenario path is the one parallel path: SCENARIO_BATCH_CONCURRENCY bounds it
+# for the quota, and the plan does the job of the "already generated" list.
 
 # Option indexes on MCQ / Multi-Choice questions are zero-based — the convention
 # resources/prompts.yaml states, resources/schemas.json documents and the UI

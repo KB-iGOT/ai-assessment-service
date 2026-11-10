@@ -10,7 +10,8 @@ later without regenerating anything.
 
 The flow mirrors the batched path in generator.py and reuses its pure
 helpers — batch planning, merging, trimming, the "already generated" digest and
-the per-batch retry — with three differences:
+the per-batch retry — with three differences (a fourth, the planned parallel
+path, is described under "Planned parallel generation" below):
 
   * **Its own prompt and response schema.** `scenario_prompt_template` in
     resources/prompts.yaml, and `SCENARIO_SCHEMA` below.
@@ -29,14 +30,23 @@ kept for a reviewer to fix through the editing endpoints.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import logging
-from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+import time
+from collections import Counter, deque
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from . import generator as gen
 from .batching import Batch, merge_batches, plan_batches, summarize_for_dedup
-from .config import SCENARIO_BATCH_SIZE, TOPUP_MAX_ROUNDS
+from .config import (
+    BATCH_MAX_ATTEMPTS,
+    SCENARIO_BATCH_CONCURRENCY,
+    SCENARIO_BATCH_SIZE,
+    SCENARIO_PLANNER_ENABLED,
+    TOPUP_MAX_ROUNDS,
+)
 from .questions import (
     BUCKET_ACTION_PLANNING,
     BUCKET_BY_TYPE_KEY,
@@ -267,13 +277,19 @@ def remaining_domains(
 def format_scenario_type_instructions(
     type_counts: Dict[str, int],
     domains_by_type: Dict[str, List[str]],
+    seeds_by_type: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
     """
     The per-type count block, with the domain of each question listed in
     order. Types with a zero count are listed as DO NOT GENERATE, for the same
     reason as on the standard path: naming every type stops the model
     volunteering one that was not asked for.
+
+    On the planned path each domain line also carries that question's seed
+    (see `format_seed`), lined up with the domains the same way `slice_plan`
+    hands them out, and the block ends with what a seed does and does not fix.
     """
+    seeds_by_type = seeds_by_type or {}
     lines: List[str] = []
     for type_key in SCENARIO_TYPE_KEYS:
         count = int(type_counts.get(type_key) or 0)
@@ -285,9 +301,38 @@ def format_scenario_type_instructions(
         if not domains:
             lines.append(f"     - {count} {label}")
             continue
-        lines.append(f"     - {count} {label}, with these scenario domains in order:")
-        lines.extend(f"         {i}. {domain}" for i, domain in enumerate(domains, start=1))
+        seeds = seeds_by_type.get(type_key) or []
+        if seeds:
+            lines.append(f"     - {count} {label}, with these scenario domains and seeds in order:")
+            lines.extend(
+                f"         {i}. {domain}" + (f" — {format_seed(seeds[i - 1])}" if i <= len(seeds) else "")
+                for i, domain in enumerate(domains, start=1)
+            )
+        else:
+            lines.append(f"     - {count} {label}, with these scenario domains in order:")
+            lines.extend(f"         {i}. {domain}" for i, domain in enumerate(domains, start=1))
+    if any(seeds_by_type.values()):
+        lines.extend([
+            "",
+            "     Each seed fixes only who the learner is, where the scenario is set,",
+            "     what kind of event starts it and the main roles involved. It is a",
+            "     starting point that keeps the questions of this assessment apart, not",
+            "     a script. You design the problem, stakes, constraints, title and",
+            "     question, following input 10 for the difficulty level. Add people,",
+            "     details and constraints wherever they make a stronger question.",
+            "     The learner is \"you\", in the position the seed gives: write the",
+            "     scenario and question in the second person, with you as the person",
+            "     who must act.",
+        ])
     return "\n" + "\n".join(lines)
+
+
+def format_seed(seed: Dict[str, Any]) -> str:
+    """One planned seed as it appears next to its domain in section 9."""
+    return (
+        f"you: {seed.get('learner')}; setting: {seed.get('setting')}; "
+        f"trigger: {seed.get('trigger')}; roles: {seed.get('roles')}"
+    )
 
 
 def format_scenario_previously_generated(digest: List[Dict[str, str]]) -> str:
@@ -333,6 +378,7 @@ def build_scenario_prompt(
     type_counts: Dict[str, int],
     domains_by_type: Dict[str, List[str]],
     previously_generated: str = "",
+    seeds_by_type: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> str:
     """
     Render `scenario_prompt_template`.
@@ -343,7 +389,8 @@ def build_scenario_prompt(
     """
     prompt = gen.ASSESSMENT_PROMPTS.get("scenario_prompt_template", "")
     structural = [
-        ("{question_type_instructions}", format_scenario_type_instructions(type_counts, domains_by_type)),
+        ("{question_type_instructions}",
+         format_scenario_type_instructions(type_counts, domains_by_type, seeds_by_type)),
         ("{total_questions}", str(sum(int(v or 0) for v in type_counts.values()))),
         ("{difficulty_level}", inputs.get("difficulty_level") or "intermediate"),
         ("{time_to_complete}", inputs.get("time_to_complete") or "Not provided (use standard pacing)"),
@@ -472,6 +519,218 @@ async def _run_scenario_batches(
         logger.info(f"[{job_id}] {label}{batch.describe()} complete | {len(digest)} questions so far")
 
     return payloads, usages
+
+
+# --------------------------------------------------------------------------
+# Planned parallel generation
+# --------------------------------------------------------------------------
+# Used only when SCENARIO_PLANNER_ENABLED is on and the request needs more than
+# one batch. The sequential path above makes batch N wait for batches 1..N-1 so
+# it can see what they wrote; here one planning call gives every question a
+# seed up front — where its scenario is set, what kind of event starts it and
+# the main roles involved — and the batches then run in parallel.
+#
+# A seed only keeps the questions apart. It carries no problem, stakes, title or
+# judgment: the batch designs those itself under the full rules of
+# scenario_prompt_template, which is where the difficulty levels are defined.
+# Each batch sees its own seeds only, next to their domains in section 9; the
+# template is otherwise unchanged and the batch's {previously_generated} block is
+# empty.
+
+_PLAN_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "plan": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "slot": {"type": "integer", "description": "The slot number exactly as listed."},
+                    "learner": {
+                        "type": "string",
+                        "description": "The learner's own position in this scenario — always one the "
+                                       "target audience holds.",
+                    },
+                    "setting": _STRING,
+                    "trigger": _STRING,
+                    "roles": _STRING,
+                },
+                "required": ["slot", "learner", "setting", "trigger", "roles"],
+            },
+        },
+    },
+    "required": ["plan"],
+}
+
+_SEED_FIELDS = ("learner", "setting", "trigger", "roles")
+
+
+def plan_slots(domains_by_type: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    """
+    One slot per question, numbered from 1 in type order, each carrying the
+    type and the domain `assign_domains` gave it.
+    """
+    slots: List[Dict[str, Any]] = []
+    for type_key in SCENARIO_TYPE_KEYS:
+        for domain in domains_by_type.get(type_key) or []:
+            slots.append({"slot": len(slots) + 1, "type": type_key, "domain": domain})
+    return slots
+
+
+def build_scenario_plan_prompt(inputs: Dict[str, Any], slots: List[Dict[str, Any]]) -> str:
+    """
+    Render `scenario_plan_template`, replacing user-supplied values last.
+
+    Each slot is listed with its domain only. The question type and the
+    difficulty level are left out: a seed suits any of them, and the batch
+    applies both when it writes the question.
+    """
+    prompt = gen.ASSESSMENT_PROMPTS.get("scenario_plan_template", "")
+    slot_lines = "\n".join(f"   {s['slot']:>4}. {s['domain']}" for s in slots)
+    structural = [
+        ("{plan_slots}", slot_lines),
+        ("{total_slots}", str(len(slots))),
+        ("{input_language}", inputs.get("input_language") or "English"),
+    ]
+    supplied = [
+        ("{assessment_topic}", inputs.get("assessment_topic") or ""),
+        ("{target_audience}", inputs.get("target_audience") or ""),
+        ("{learning_areas}", inputs.get("learning_areas") or ""),
+        ("{additional_instructions}", inputs.get("additional_instructions") or "None provided"),
+        ("{content_context}", inputs.get("content_context") or _NO_CONTENT),
+    ]
+    for placeholder, value in structural + supplied:
+        prompt = prompt.replace(placeholder, value)
+    return prompt
+
+
+def parse_plan(payload: Any, slots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    The plan entries merged onto their slots, in slot order.
+
+    Raises ValueError when the plan cannot be used as it is — a slot missing,
+    repeated or unknown, or an entry missing a seed field — which is what makes
+    the planning call retry. Nothing else is checked.
+    """
+    entries = payload.get("plan") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        raise ValueError("Plan response has no `plan` list")
+
+    by_slot = {s["slot"]: s for s in slots}
+    planned: Dict[int, Dict[str, Any]] = {}
+    problems: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            problems.append("an entry that is not an object")
+            continue
+        try:
+            number = int(entry.get("slot"))
+        except (TypeError, ValueError):
+            problems.append(f"slot {entry.get('slot')!r} is not a number")
+            continue
+        seed = {field: " ".join(str(entry.get(field) or "").split()) for field in _SEED_FIELDS}
+        if number not in by_slot:
+            problems.append(f"unknown slot {number}")
+        elif number in planned:
+            problems.append(f"slot {number} planned twice")
+        elif not all(seed.values()):
+            problems.append(f"slot {number} has no {', '.join(f for f in _SEED_FIELDS if not seed[f])}")
+        else:
+            planned[number] = {**by_slot[number], **seed}
+
+    missing = [n for n in by_slot if n not in planned]
+    if missing:
+        problems.append(f"{len(missing)} slot(s) not planned, e.g. {missing[:5]}")
+    if problems:
+        raise ValueError(f"Plan unusable: {'; '.join(problems[:5])}")
+    return [planned[s["slot"]] for s in slots]
+
+
+async def _generate_plan(
+    inputs: Dict[str, Any],
+    slots: List[Dict[str, Any]],
+    job_id: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    The planning call. Re-run only when its response cannot be used — not
+    valid JSON, or a plan `parse_plan` rejects — up to BATCH_MAX_ATTEMPTS.
+    """
+    prompt = build_scenario_plan_prompt(inputs, slots)
+    attempts = max(1, BATCH_MAX_ATTEMPTS)
+    last_error: Optional[Exception] = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response_text, usage = await gen.call_llm(prompt, schema=_PLAN_SCHEMA, use_kcm_cache=False)
+            return parse_plan(json.loads(response_text), slots), usage
+        except Exception as exc:  # noqa: BLE001 — retried, then re-raised below
+            last_error = exc
+            if attempt < attempts:
+                logger.warning(f"[{job_id}] Scenario plan attempt {attempt}/{attempts} failed, retrying | {exc}")
+    raise last_error if last_error else RuntimeError("Scenario planning failed")
+
+
+def slice_plan(
+    batches: List[Batch],
+    plan: List[Dict[str, Any]],
+) -> List[Dict[str, List[Dict[str, Any]]]]:
+    """
+    Each batch's seeds per type, taken off the front of a per-type queue in the
+    order `plan_batches` hands out the domains, so seed and domain line up.
+    """
+    queues: Dict[str, Deque[Dict[str, Any]]] = {}
+    for entry in plan:
+        queues.setdefault(entry["type"], deque()).append(entry)
+    out: List[Dict[str, List[Dict[str, Any]]]] = []
+    for batch in batches:
+        seeds: Dict[str, List[Dict[str, Any]]] = {}
+        for type_key in SCENARIO_TYPE_KEYS:
+            queue = queues.get(type_key) or deque()
+            taken = [queue.popleft() for _ in range(min(int(batch.type_counts.get(type_key) or 0), len(queue)))]
+            if taken:
+                seeds[type_key] = taken
+        out.append(seeds)
+    return out
+
+
+async def _run_planned_batches(
+    batches: List[Batch],
+    seeds_by_batch: List[Dict[str, List[Dict[str, Any]]]],
+    *,
+    inputs: Dict[str, Any],
+    job_id: str,
+) -> Tuple[List[Any], List[Any]]:
+    """
+    Generate `batches` in parallel, at most SCENARIO_BATCH_CONCURRENCY at a
+    time, each with its own seeds only. Unlike the sequential path, a batch that
+    fails after its retries does not stop the others: its slots are left for the
+    top-up round.
+    """
+    semaphore = asyncio.Semaphore(max(1, SCENARIO_BATCH_CONCURRENCY))
+    async def run(batch: Batch, seeds: Dict[str, List[Dict[str, Any]]]) -> Optional[Tuple[Any, Any]]:
+        prompt = build_scenario_prompt(
+            inputs,
+            type_counts=batch.type_counts,
+            domains_by_type=batch.blooms_by_type,
+            seeds_by_type=seeds,
+        )
+        async with semaphore:
+            try:
+                payload, usage = await gen._generate_question_batch(
+                    prompt=prompt, schema=SCENARIO_SCHEMA, batch=batch, job_id=job_id,
+                    llm_kwargs={"use_kcm_cache": False},
+                )
+            except Exception as exc:  # noqa: BLE001 — already retried inside
+                logger.error(
+                    f"[{job_id}] planned {batch.describe()} failed after retries — its "
+                    f"slots are left for the top-up round | {exc}"
+                )
+                return None
+        logger.info(f"[{job_id}] planned {batch.describe()} complete")
+        return payload, usage
+
+    results = await asyncio.gather(*(run(b, s) for b, s in zip(batches, seeds_by_batch)))
+    done = [r for r in results if r is not None]
+    return [payload for payload, _ in done], [usage for _, usage in done]
 
 
 async def _reconcile(
@@ -696,14 +955,38 @@ async def generate_scenario_assessment(
 
     domains_by_type = assign_domains(wanted, domains)
     batches = plan_batches(wanted, domains_by_type, batch_size=SCENARIO_BATCH_SIZE)
+    planned = SCENARIO_PLANNER_ENABLED and len(batches) > 1
+    started = time.monotonic()
     logger.info(
         f"[{job_id}] Scenario generation | topic={topic!r} | {len(batches)} batch(es) | "
-        f"{requested_total} questions | domains={domains}"
+        f"{requested_total} questions | domains={domains} | "
+        f"{'planned, ' + str(SCENARIO_BATCH_CONCURRENCY) + ' in parallel' if planned else 'sequential'}"
     )
 
-    payloads, usages = await _run_scenario_batches(
-        batches, digest=[], inputs=inputs, job_id=job_id,
-    )
+    payloads: List[Any] = []
+    usages: List[Any] = []
+    if planned:
+        try:
+            plan, plan_usage = await _generate_plan(inputs, plan_slots(domains_by_type), job_id)
+        except Exception as exc:  # noqa: BLE001 — fall back rather than fail the job
+            logger.error(f"[{job_id}] Scenario planning failed — falling back to sequential batches | {exc}")
+            planned = False
+        else:
+            logger.info(f"[{job_id}] Scenario plan ready | {len(plan)} slots | {time.monotonic() - started:.0f}s")
+            # Kept with the job's metadata so the plan can be inspected in the UI.
+            # Metadata is never exported, so this reaches no download.
+            metadata["scenario_plan"] = [
+                {k: entry.get(k) for k in ("slot", "type", "domain", *_SEED_FIELDS)}
+                for entry in plan
+            ]
+            payloads, usages = await _run_planned_batches(
+                batches, slice_plan(batches, plan), inputs=inputs, job_id=job_id,
+            )
+            usages.insert(0, plan_usage)
+    if not planned:
+        payloads, usages = await _run_scenario_batches(
+            batches, digest=[], inputs=inputs, job_id=job_id,
+        )
     if not payloads:
         raise RuntimeError("Every scenario question batch failed")
 
@@ -733,6 +1016,7 @@ async def generate_scenario_assessment(
     logger.info(
         f"[{job_id}] Scenario generation complete | "
         f"{sum(len(v) for v in pool.values())}/{requested_total} questions | "
-        f"{len(usages)} calls | total_tokens={usage.get('total_token_count', 'N/A')}"
+        f"{len(usages)} calls | total_tokens={usage.get('total_token_count', 'N/A')} | "
+        f"{time.monotonic() - started:.0f}s"
     )
     return metadata, assessment, usage

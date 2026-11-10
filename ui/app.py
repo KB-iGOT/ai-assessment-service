@@ -760,6 +760,30 @@ with tab_view:
                 with st.expander("📐 Blueprint (as stored)"):
                     st.json(assessment_data.get("blueprint") or {}, expanded=True)
 
+                # Temporary: the planner's output, saved in the job metadata when
+                # a scenario assessment went through the planned parallel path.
+                _plan = (data.get("metadata") or {}).get("scenario_plan") or []
+                if _plan:
+                    with st.expander(f"🗺️ Scenario plan — planner output ({len(_plan)} slots)"):
+                        st.caption("The seed the planning call gave each question slot before any "
+                                   "question was written. The batch designs the scenario from it.")
+                        st.dataframe(
+                            [
+                                {
+                                    "Slot": p.get("slot"),
+                                    "Type": p.get("type"),
+                                    "Domain": p.get("domain"),
+                                    "Learner": p.get("learner"),
+                                    "Setting": p.get("setting"),
+                                    "Trigger": p.get("trigger"),
+                                    "Roles": p.get("roles"),
+                                }
+                                for p in _plan
+                            ],
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
                 # ---------- add a question ----------
                 # Course choices for this assessment — the same names the LLM was
                 # given at generation time (aggregated metadata's `courses`, or the

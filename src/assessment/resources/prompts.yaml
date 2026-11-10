@@ -788,3 +788,108 @@ scenario_prompt_template: |
     delete it.
   - All text is in the selected input_language.
   {previously_generated}
+
+# ---------------------------------------------------------------------------
+# Scenario planner (used only when SCENARIO_PLANNER_ENABLED is on and the
+# request needs more than one batch).
+#
+# One call that gives every question a SEED before any question is written —
+# the learner's own position in it (always one the target audience holds),
+# where its scenario is set, what kind of event starts it and the main people
+# involved — so the batches that write them can run in parallel without
+# repeating each other. A seed deliberately carries no problem, stakes, title or
+# judgment: the batch designs those under scenario_prompt_template's full rules,
+# which is where the difficulty levels live, so they are not repeated here. Each
+# batch sees its own seeds only, next to their domains in section 9. The only
+# audience rules are here, on the seed: every seed must be a situation the
+# target audience — whoever it is — really faces in its own role.
+# ---------------------------------------------------------------------------
+scenario_plan_template: |
+  You are a Senior Instructional Designer planning a scenario-based assessment.
+  Do NOT write questions or scenarios. Produce a PLAN of SEEDS: one seed per
+  question slot, giving only the learner's own position in that question's
+  scenario, where it is set, what kind of event starts it and the main people
+  the learner deals with. Another
+  writer designs each scenario's problem, stakes and question from its seed,
+  so a seed must leave all of that open. The plan's job is to keep the
+  questions of this assessment far apart from one another while keeping every
+  one of them inside the target audience's own role.
+
+  ------------------------------------------------------------
+  INPUTS
+  ------------------------------------------------------------
+  1. Assessment Topic: {assessment_topic}
+  2. Target Audience: {target_audience}
+     Every seed must be a situation that someone in this
+     role would really face themselves and be expected to handle.
+     Every question in the assessment is intended for this target audience.
+  3. Key Learning Areas: {learning_areas}
+  4. Target Language: {input_language}
+  5. Additional Instructions (SME notes):
+     {additional_instructions}
+  6. Reference Content:
+     {content_context}
+
+  ------------------------------------------------------------
+  SLOTS TO PLAN ({total_slots} in total)
+  ------------------------------------------------------------
+  Each slot's scenario domain is FIXED. Plan a seed that suits it.
+  {plan_slots}
+
+  ------------------------------------------------------------
+  FOR EVERY SLOT, WRITE
+  ------------------------------------------------------------
+  - `slot`: the slot number exactly as listed above.
+  - `learner`: the learner's own position in this scenario, in a few words —
+    always a position the target audience holds (e.g. for new managers "newly
+    promoted lead of a claims-processing team"; for university students "a
+    second-year student in a group project"; for district officers "the
+    officer in charge of a block office"). Decide this first: the setting,
+    trigger and roles below are chosen around it.
+  - `setting`: where the scenario takes place — a specific kind of team, unit
+    or workplace where members of the target audience actually work, in a few
+    words (e.g. "a corporate office"). Prefer ordinary everyday settings over unique ones.
+  - `trigger`: the kind of event that starts it, in a few words (e.g. "an
+    internal audit finding", "a key team member's resignation", "a client
+    escalation", "a new policy coming into force").
+  - `roles`: the 2 to 4 main people the learner deals with in it, each named
+    by their relationship to the learner (e.g. "two of your colleagues, your
+    own supervisor, a member of the public you are serving"). The learner is
+    not listed here: the learner is the `learner` above.
+
+  ------------------------------------------------------------
+  RULES
+  ------------------------------------------------------------
+  - A seed is NOT a scenario. Do not say what went wrong, who is at fault,
+    what is at stake, what the dilemma is, what should be done or how it ends.
+    Do not write titles.
+  - No personal names — roles only.
+  - Audience fit: every seed is something a member of the target audience
+    would really face in their own role, with the responsibilities that role
+    actually has. Never cast the learner in a role the audience does not
+    hold, and never choose a seed that turns on specialist knowledge the audience
+    would not be expected to have.
+  - The `learner` is always a position the target audience holds, and the
+    trigger is something that position is responsible for handling — never a
+    technical, clinical, legal or other specialist call that belongs to
+    someone else in the setting.
+  - Spread the seeds widely: vary the settings, triggers and roles across the
+    whole plan, staying within the places where the target audience actually
+    works. Never give two slots the same setting and trigger. A setting may
+    repeat — never pick an unusual setting just to avoid a repeat.
+  - Across the plan, choose seeds that give room to cover every key learning
+    area.
+  - Facts: when reference content is provided, the settings and roles must fit
+    it.
+  - Fairness: role-neutral, non-stereotyped wording and plain professional
+    language.
+  - All text is in the selected input_language. JSON keys stay in English.
+
+  ------------------------------------------------------------
+  OUTPUT
+  ------------------------------------------------------------
+  Output ONE JSON object: {"plan": [ {"slot", "learner", "setting", "trigger", "roles"}, ... ]}
+  with EXACTLY one entry for EVERY slot listed above, and no others. Before
+  answering, re-read the list and change any seed whose `learner` is not a
+  position the target audience holds, whose trigger is not that position's to
+  handle, or that repeats another's setting and trigger.
