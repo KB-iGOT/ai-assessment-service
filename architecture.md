@@ -466,7 +466,7 @@ Request header
         Fetch JWKS from Sunbird SSO
             └── Verify signature, expiry, issuer
                     └── Extract user_id (sub claim)
-                            └── Check required role (AI_ASSESSMENT_CREATOR)
+                            └── Check role: any of AI_ASSESSMENT_CREATOR, MDO_ADMIN, MDO_LEADER
 ```
 
 The `user_id` extracted here becomes the owner identity for all DB records and Langfuse traces. Bypass with `DISABLE_AUTH_VERIFICATION=true` (development only).

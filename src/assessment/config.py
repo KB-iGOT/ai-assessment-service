@@ -24,7 +24,10 @@ TRANSCODER_STATS_URL = f"{LEARNING_AI_BASE_URL}/api/kb-pipeline/v3/transcoder/st
 # SSO / Auth Configuration
 SSO_URL = os.getenv("SUNBIRD_SSO_URL")
 SSO_REALM = os.getenv("SUNBIRD_SSO_REALM")
-REQUIRED_ROLE = os.getenv("REQUIRED_ROLE", "AI_ASSESSMENT_CREATOR")
+# Comma-separated roles accepted for authentication.
+REQUIRED_ROLE = os.getenv(
+    "REQUIRED_ROLE", "AI_ASSESSMENT_CREATOR,MDO_ADMIN,MDO_LEADER"
+)
 
 # Derived: JWKS endpoint built from SSO_URL + realm
 JWKS_URL = f"{SSO_URL}realms/{SSO_REALM}/protocol/openid-connect/certs" if SSO_URL and SSO_REALM else None

@@ -438,7 +438,7 @@ Copy `.env.example` → `.env` and fill in values. **Never commit `.env`.**
 | `LEARNING_AI_BASE_URL` | Worker | Learning AI API for VTT/PDF fetch |
 | `SUNBIRD_SSO_URL` | API | SSO base URL for JWKS endpoint |
 | `SUNBIRD_SSO_REALM` | API | Keycloak realm name |
-| `REQUIRED_ROLE` | API | JWT role required to use the service |
+| `REQUIRED_ROLE` | API | Comma-separated JWT roles allowed to use the service; a token holding any one of them passes (default `AI_ASSESSMENT_CREATOR,MDO_ADMIN,MDO_LEADER`) |
 | `DISABLE_AUTH_VERIFICATION` | API | `true` to bypass JWT check (dev only) |
 | `KAFKA_BOOTSTRAP_SERVERS` | Both | `localhost:29092` (local) or `kafka:9092` (Docker) |
 | `KAFKA_REQUEST_TOPIC` | Both | Topic for generation requests |
