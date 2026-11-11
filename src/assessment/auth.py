@@ -63,7 +63,8 @@ def check_iss(iss: str) -> bool:
 
 def check_role(payload: Dict[str, Any]) -> bool:
     roles = payload.get("user_roles", [])
-    return REQUIRED_ROLE in roles
+    required_roles = [role.strip() for role in REQUIRED_ROLE.split(",") if role.strip()]
+    return any(role in roles for role in required_roles)
 
 # Singleton Instance
 key_manager = KeyManager()
@@ -108,8 +109,8 @@ async def validate_token(token: str) -> Dict[str, Any]:
             raise HTTPException(status_code=401, detail="Token issuer invalid")
 
         if not check_role(payload):
-            logger.warning(f"Token missing required role: {REQUIRED_ROLE}")
-            raise HTTPException(status_code=403, detail=f"Forbidden: role '{REQUIRED_ROLE}' required")
+            logger.warning(f"Token missing required role(s): {REQUIRED_ROLE}")
+            raise HTTPException(status_code=403, detail=f"Forbidden: one of roles '{REQUIRED_ROLE}' required")
 
         return payload
 
