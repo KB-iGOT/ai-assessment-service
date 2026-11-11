@@ -28,12 +28,21 @@ from .questions import (
     BLOOMS_LEVELS,
     MAX_OPTION_COUNT,
     MIN_OPTION_COUNT,
+    RUBRIC_ANCHOR_LEVELS,
+    RUBRIC_BUCKETS,
+    BUCKET_ACTION_PLANNING,
     BUCKET_FTB,
     BUCKET_MCQ,
     BUCKET_MTF,
     BUCKET_MULTICHOICE,
+    BUCKET_OPEN_TEXT,
+    BUCKET_RANKING,
+    BUCKET_SCENARIO_MCQ,
+    BUCKET_SCENARIO_MULTISELECT,
+    BUCKET_SHORT_ANSWER,
     BUCKET_TRUEFALSE,
     FTB_BLANK_PATTERN,
+    SCENARIO_BUCKETS,
     VALID_PROVENANCE,
     is_legacy_ftb,
     iter_questions_in_order,
@@ -42,6 +51,9 @@ from .questions import (
 
 # Minimum number of left/right pairs for a Match-the-Following question.
 MIN_MTF_PAIRS = 2
+
+# Path of the explanation every question must carry.
+RATIONALE_FIELD = "answer_rationale.correct_answer_explanation"
 
 # --------------------------------------------------------------------------
 # Editable field allowlist
@@ -53,7 +65,7 @@ MIN_MTF_PAIRS = 2
 # it is out of scope for this release.
 
 _COMMON_EDITABLE = {
-    "answer_rationale.correct_answer_explanation",
+    RATIONALE_FIELD,
     "answer_rationale.why_factor",
     "answer_rationale.logic_justification",
     "blooms_level",
@@ -100,6 +112,32 @@ EDITABLE_FIELDS: Dict[str, set] = {
     },
 }
 
+# Scenario questions carry no Bloom's level, relevance score, KCM mapping or
+# course — a scenario assessment is generated from a topic, not a course.
+_SCENARIO_COMMON_EDITABLE = {
+    "question_text",
+    "scenario.title",
+    "scenario.description",
+    "scenario.constraints",
+    "scenario_domain",
+    "difficulty_level",
+    RATIONALE_FIELD,
+}
+
+_SCENARIO_OPTION_EDITABLE = _SCENARIO_COMMON_EDITABLE | {
+    "options",
+    "correct_option_index",
+}
+
+EDITABLE_FIELDS.update({
+    BUCKET_SCENARIO_MCQ: _SCENARIO_OPTION_EDITABLE,
+    BUCKET_SCENARIO_MULTISELECT: _SCENARIO_OPTION_EDITABLE,
+    BUCKET_RANKING: _SCENARIO_COMMON_EDITABLE | {"options", "correct_ranking"},
+    BUCKET_OPEN_TEXT: _SCENARIO_COMMON_EDITABLE | {"reference_answer", "rubric"},
+    BUCKET_SHORT_ANSWER: _SCENARIO_COMMON_EDITABLE | {"expected_answer", "rubric"},
+    BUCKET_ACTION_PLANNING: _SCENARIO_COMMON_EDITABLE | {"expected_components", "rubric"},
+})
+
 # A legacy FTB keeps the fields it has always had. `options` is deliberately
 # absent, so a legacy FTB can never be converted to an option FTB.
 LEGACY_FTB_EDITABLE = _COMMON_EDITABLE | {
@@ -124,7 +162,13 @@ SERVER_OWNED_FIELDS = {"question_id", "question_type", "provenance", "position",
 
 # Answer-key paths — a change here is the answer-key change (Correct Answer
 # Changed) and is recorded as its own audit event.
-ANSWER_KEY_FIELDS = {"correct_option_index", "correct_answer", "pairs"}
+ANSWER_KEY_FIELDS = {
+    "correct_option_index", "correct_answer", "pairs",
+    # Scenario types: the ranking key, and the expected answers the written
+    # types are marked against.
+    "correct_ranking", "reference_answer", "expected_answer",
+    "expected_components",
+}
 
 # Mapping paths — a change here is a mapping update (Mapping Updated).
 KCM_AREA_FIELD = "reasoning.competency_alignment.kcm.competency_area"
@@ -211,6 +255,9 @@ def validate_question(
     `edited_paths` scopes the vocabulary half of mapping validation — see
     `validate_mapping`.
     """
+    if bucket in SCENARIO_BUCKETS:
+        return validate_scenario_question(bucket, question)
+
     qid = question.get("question_id")
     errors: List[Dict[str, Any]] = []
 
@@ -247,9 +294,8 @@ def validate_question(
         errors.extend(_validate_pairs(question, qid))
 
     # --- rationale -----------------------------------------------------
-    if _is_blank(get_path(question, "answer_rationale.correct_answer_explanation")):
-        errors.append(_err("rationale_required",
-                           "answer_rationale.correct_answer_explanation", qid))
+    if _is_blank(get_path(question, RATIONALE_FIELD)):
+        errors.append(_err("rationale_required", RATIONALE_FIELD, qid))
 
     # --- Bloom's level ---------------------------------------------
     blooms = question.get("blooms_level")
@@ -318,9 +364,14 @@ def _validate_options(bucket: str, question: Dict[str, Any],
         errors.append(_err("option_index_duplicate", "options", qid))
 
     valid_indexes = set(indexes)
+
+    if bucket == BUCKET_RANKING:
+        errors.extend(_validate_ranking_key(question, valid_indexes, qid))
+        return errors
+
     correct = question.get("correct_option_index")
 
-    if bucket in (BUCKET_MCQ, BUCKET_FTB):
+    if bucket in (BUCKET_MCQ, BUCKET_FTB, BUCKET_SCENARIO_MCQ):
         if isinstance(correct, list):
             errors.append(_err("correct_option_index_invalid", "correct_option_index", qid,
                                expects="single_index"))
@@ -334,7 +385,7 @@ def _validate_options(bucket: str, question: Dict[str, Any],
                 errors.append(_err("correct_option_index_out_of_range",
                                    "correct_option_index", qid,
                                    found=correct, valid_indexes=sorted(valid_indexes)))
-    else:  # BUCKET_MULTICHOICE
+    else:  # BUCKET_MULTICHOICE, BUCKET_SCENARIO_MULTISELECT
         if not isinstance(correct, list) or not correct:
             errors.append(_err("correct_option_index_required", "correct_option_index", qid,
                                expects="index_array"))
@@ -353,6 +404,149 @@ def _validate_options(bucket: str, question: Dict[str, Any],
             if len(chosen) != len(correct):
                 errors.append(_err("correct_option_index_duplicate",
                                    "correct_option_index", qid))
+
+    return errors
+
+
+def _validate_ranking_key(question: Dict[str, Any], valid_indexes: set,
+                          qid: Optional[str]) -> List[Dict[str, Any]]:
+    """`correct_ranking` must order every option exactly once, best first."""
+    ranking = question.get("correct_ranking")
+    if not isinstance(ranking, list) or not ranking:
+        return [_err("correct_ranking_required", "correct_ranking", qid)]
+    try:
+        ranked = [int(x) for x in ranking]
+    except (TypeError, ValueError):
+        return [_err("correct_ranking_invalid", "correct_ranking", qid)]
+    if len(set(ranked)) != len(ranked) or set(ranked) != valid_indexes:
+        return [_err("correct_ranking_invalid", "correct_ranking", qid,
+                     found=ranked, valid_indexes=sorted(valid_indexes))]
+    return []
+
+
+# --------------------------------------------------------------------------
+# Scenario question validation
+# --------------------------------------------------------------------------
+
+def validate_scenario_question(bucket: str, question: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Every rule a scenario question violates. Empty list == valid.
+
+    Scenario questions have their own shape: a `scenario` block, a
+    `scenario_domain`, and per type an answer key, expected answer or rubric.
+    They carry no Bloom's level, relevance score or KCM mapping, so none of
+    those rules apply.
+    """
+    qid = question.get("question_id")
+    errors: List[Dict[str, Any]] = []
+
+    if _is_blank(question.get("question_text")):
+        errors.append(_err("question_text_required", "question_text", qid))
+
+    scenario = question.get("scenario")
+    scenario = scenario if isinstance(scenario, dict) else {}
+    if _is_blank(scenario.get("title")):
+        errors.append(_err("scenario_title_required", "scenario.title", qid))
+    if _is_blank(scenario.get("description")):
+        errors.append(_err("scenario_description_required", "scenario.description", qid))
+    constraints = scenario.get("constraints")
+    if constraints is not None and not _is_string_list(constraints, allow_empty=True):
+        errors.append(_err("scenario_constraints_invalid", "scenario.constraints", qid))
+
+    if _is_blank(question.get("scenario_domain")):
+        errors.append(_err("scenario_domain_required", "scenario_domain", qid))
+
+    if bucket in (BUCKET_SCENARIO_MCQ, BUCKET_SCENARIO_MULTISELECT, BUCKET_RANKING):
+        errors.extend(_validate_options(bucket, question, qid))
+    elif bucket == BUCKET_OPEN_TEXT:
+        if _is_blank(question.get("reference_answer")):
+            errors.append(_err("reference_answer_required", "reference_answer", qid))
+    elif bucket == BUCKET_SHORT_ANSWER:
+        if _is_blank(question.get("expected_answer")):
+            errors.append(_err("expected_answer_required", "expected_answer", qid))
+    elif bucket == BUCKET_ACTION_PLANNING:
+        if not _is_string_list(question.get("expected_components")):
+            errors.append(_err("expected_components_required", "expected_components", qid))
+
+    if bucket in RUBRIC_BUCKETS:
+        errors.extend(validate_rubric(question.get("rubric"), qid))
+
+    if _is_blank(get_path(question, RATIONALE_FIELD)):
+        errors.append(_err("rationale_required", RATIONALE_FIELD, qid))
+
+    if question.get("provenance") not in VALID_PROVENANCE:
+        errors.append(_err("provenance_invalid", "provenance", qid,
+                           allowed=sorted(VALID_PROVENANCE),
+                           found=question.get("provenance")))
+
+    return errors
+
+
+def _is_string_list(value: Any, *, allow_empty: bool = False) -> bool:
+    """A list of non-blank strings — non-empty unless `allow_empty`."""
+    if not isinstance(value, list) or (not value and not allow_empty):
+        return False
+    return all(isinstance(v, str) and v.strip() for v in value)
+
+
+def validate_rubric(rubric: Any, qid: Optional[str]) -> List[Dict[str, Any]]:
+    """
+    A written-answer question's rubric (framework document, sections 8 and 9).
+
+    Each criterion has a name, a description, a `weight_percent`, an anchor for
+    every score level 0–3 — the fields the framework requires. The weights are
+    each criterion's share of the question's marks, so they must sum to 100.
+    `description` and `evidence_indicators` are only recommended by the
+    framework, so they are optional; evidence indicators, when given, must be
+    non-blank lines. There is no limit on the number of criteria — it follows
+    from the question.
+    """
+    if not isinstance(rubric, list) or not rubric:
+        return [_err("rubric_required", "rubric", qid)]
+
+    errors: List[Dict[str, Any]] = []
+    names: List[str] = []
+    weights: List[int] = []
+    for i, criterion in enumerate(rubric):
+        path = f"rubric.{i}"
+        position = i + 1
+        if not isinstance(criterion, dict):
+            errors.append(_err("rubric_criterion_malformed", path, qid, criterion_position=position))
+            continue
+
+        name = criterion.get("criterion")
+        if _is_blank(name):
+            errors.append(_err("rubric_criterion_required", f"{path}.criterion", qid,
+                               criterion_position=position))
+        else:
+            names.append(" ".join(str(name).split()).casefold())
+
+        weight = criterion.get("weight_percent")
+        if type(weight) is not int or not 1 <= weight <= 100:
+            errors.append(_err("rubric_weight_invalid", f"{path}.weight_percent", qid,
+                               criterion_position=position, minimum=1, maximum=100,
+                               found=weight))
+        else:
+            weights.append(weight)
+
+        anchors = criterion.get("score_anchors")
+        anchors = anchors if isinstance(anchors, dict) else {}
+        missing = [level for level in RUBRIC_ANCHOR_LEVELS if _is_blank(anchors.get(level))]
+        if missing:
+            errors.append(_err("rubric_anchor_required", f"{path}.score_anchors", qid,
+                               criterion_position=position, missing=missing))
+
+        evidence = criterion.get("evidence_indicators")
+        if evidence is not None and not _is_string_list(evidence, allow_empty=True):
+            errors.append(_err("rubric_evidence_invalid", f"{path}.evidence_indicators", qid,
+                               criterion_position=position))
+
+    if len(set(names)) != len(names):
+        errors.append(_err("rubric_criterion_duplicate", "rubric", qid))
+    # Only meaningful once every weight is itself valid.
+    if len(weights) == len(rubric) and sum(weights) != 100:
+        errors.append(_err("rubric_weight_total_invalid", "rubric", qid,
+                           expected=100, found=sum(weights)))
 
     return errors
 

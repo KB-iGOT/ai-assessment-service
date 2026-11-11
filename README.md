@@ -450,6 +450,8 @@ Copy `.env.example` → `.env` and fill in values. **Never commit `.env`.**
 | `GOOGLE_APPLICATION_CREDENTIALS` | Worker | Path to Vertex AI service account JSON |
 | `QUESTION_BATCH_SIZE` | Worker | Assessments larger than this go through the batched (sequential-call) generation path (default `25`) |
 | `BATCH_MAX_ATTEMPTS` | Worker | Retry attempts per batch before the run stops and keeps what succeeded (default `2`) |
+| `SCENARIO_PLANNER_ENABLED` | Worker | `true` generates scenario assessments that need more than one batch by planning a seed (learner, setting, trigger, roles) for every question in one call, then writing the batches in parallel; falls back to the sequential path if planning fails (default `true`) |
+| `SCENARIO_BATCH_CONCURRENCY` | Worker | Scenario batches run at the same time on the planned path; bound it by the Vertex AI per-minute quota (default `6`) |
 | `KAFKA_MAX_POLL_INTERVAL_MS` | Worker | How long one job may take before the broker assumes the consumer died and redelivers the message (default `3600000`) |
 | `ENABLE_QUESTION_BATCHING` | Worker | `false` forces every request down the original single-call path (default `true`) |
 | `NORMALIZE_OPTION_INDEX_BASE` | Worker | `false` disables the one-based→zero-based option index rebase on ingest (default `true`) |

@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 from client_side import (
     editor_list, impact_of, delete_impact, error_text, changed_fields,
     announce_added, announce_deleted, announce_reordered, outcome_text,
+    is_scenario_assessment, SCENARIO_BUCKETS, RUBRIC_BUCKETS,
+    BUCKET_SCENARIO_MCQ, BUCKET_SCENARIO_MULTISELECT, BUCKET_OPEN_TEXT,
+    BUCKET_RANKING, BUCKET_ACTION_PLANNING, BUCKET_SHORT_ANSWER,
 )
 
 # Load local .env if present
@@ -25,6 +28,13 @@ API_V1 = f"{API_BASE}/ai-assessments/v1"
 
 PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+# Text shared by the three generate forms and the question editors.
+QUESTION_COUNTS_HEADING = "#### Question Counts"
+AUTH_TOKEN_MISSING = "Please enter an Auth Token in the sidebar first."
+POLL_STATUS_HINT = "Go to 'View & Edit Result' tab to poll status."
+LABEL_SCENARIO_DOMAIN = "Scenario domain"
+LABEL_DIFFICULTY_LEVEL = "Difficulty level"
 
 st.set_page_config(page_title="Assessment Generator (Interactive)", layout="wide", page_icon="🧩")
 
@@ -41,7 +51,53 @@ force_new = st.sidebar.checkbox("Bypass Cache (Force New)", value=False)
 DISPLAY_LABELS = {
     "Multiple Choice Question": "Single selection MCQs",
     "Multi-Choice Question": "Multiple selection MCQs",
+    BUCKET_SCENARIO_MCQ: "Scenario MCQ",
+    BUCKET_SCENARIO_MULTISELECT: "Scenario multi select",
+    BUCKET_OPEN_TEXT: "Open text",
+    BUCKET_RANKING: "Situational judgment ranking",
+    BUCKET_ACTION_PLANNING: "Action & decision planning",
+    BUCKET_SHORT_ANSWER: "Scenario short answer",
 }
+
+LANGUAGES = ["english", "hindi", "bengali", "gujarati", "kannada", "malayalam", "marathi",
+             "tamil", "telugu", "odia", "punjabi", "assamese"]
+
+# Scenario question types: (label, type key) in the framework document's order.
+SCENARIO_TYPE_CHOICES = [
+    ("Scenario MCQ", "scenario_mcq"),
+    ("Scenario multi select", "scenario_multiselect"),
+    ("Open text", "open_text"),
+    ("Situational judgment ranking", "sjt_ranking"),
+    ("Action & decision planning", "action_planning"),
+    ("Scenario short answer", "short_answer"),
+]
+BUCKET_BY_SCENARIO_KEY = {
+    "scenario_mcq": BUCKET_SCENARIO_MCQ,
+    "scenario_multiselect": BUCKET_SCENARIO_MULTISELECT,
+    "open_text": BUCKET_OPEN_TEXT,
+    "sjt_ranking": BUCKET_RANKING,
+    "action_planning": BUCKET_ACTION_PLANNING,
+    "short_answer": BUCKET_SHORT_ANSWER,
+}
+
+# A starting rubric for a manually added written-answer question; the reviewer
+# rewrites it. Weights are percentages and must add up to 100.
+RUBRIC_TEMPLATE = [
+    {"criterion": c, "description": "", "weight_percent": w,
+     "score_anchors": {"0": "Not demonstrated", "1": "Limited", "2": "Competent", "3": "Strong"},
+     "evidence_indicators": [""]}
+    for c, w in (("Problem diagnosis", 40), ("Action planning", 40), ("Follow up", 20))
+]
+
+
+def lines_of(text):
+    """Non-blank, stripped lines of a text area."""
+    return [l.strip() for l in (text or "").splitlines() if l.strip()]
+
+
+def parse_indexes(text):
+    """Comma-separated integers, in order; anything else is dropped."""
+    return [int(x) for x in (text or "").replace(" ", "").split(",") if x.lstrip("-").isdigit()]
 
 def get_headers():
     return {
@@ -53,7 +109,8 @@ st.title("🧩 Assessment Generator")
 st.markdown("Test the full **Generate -> Clone -> Edit -> Event** lifecycle.")
 
 # --- Tab Layout ---
-tab_gen, tab_comp, tab_view, tab_history = st.tabs(["🚀 Generate / Clone", "📚 Comprehensive", "📝 View & Edit Result", "🗂️ History"])
+tab_gen, tab_comp, tab_scen, tab_view, tab_history = st.tabs(
+    ["🚀 Generate / Clone", "📚 Comprehensive", "🎭 Scenario", "📝 View & Edit Result", "🗂️ History"])
 
 # ==========================================
 # TAB 1: GENERATE (Standard)
@@ -86,7 +143,7 @@ with tab_gen:
                 ["english", "hindi", "bengali", "gujarati", "kannada", "malayalam", "marathi", "tamil", "telugu", "odia", "punjabi", "assamese"]
             )
             
-        st.markdown("#### Question Counts")
+        st.markdown(QUESTION_COUNTS_HEADING)
         c1, c2, c3, c4, c5 = st.columns(5)
         mcq = c1.number_input("MCQ", 0, 20, 5)
         ftb = c2.number_input("FTB", 0, 20, 5)
@@ -144,7 +201,7 @@ with tab_gen:
 
     if st.button("Start Generation", type="primary"):
         if not auth_token:
-            st.error("Please enter an Auth Token in the sidebar first.")
+            st.error(AUTH_TOKEN_MISSING)
             st.stop()
             
         # Construct Payload
@@ -209,7 +266,7 @@ with tab_gen:
                         st.balloons()
                     else: # 202
                         st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
-                        st.info("Go to 'View & Edit Result' tab to poll status.")
+                        st.info(POLL_STATUS_HINT)
                 else:
                     st.error(f"API Error ({r.status_code}): {r.text}")
                     
@@ -323,7 +380,7 @@ with tab_comp:
             "Create": cb_cre
         }
         
-    st.markdown("#### Question Counts")
+    st.markdown(QUESTION_COUNTS_HEADING)
     c1, c2, c3, c4, c5 = st.columns(5)
     cmcq = c1.number_input("MCQ", 0, 50, 10, key="cmcq")
     cftb = c2.number_input("FTB", 0, 50, 0, key="cftb")
@@ -335,7 +392,7 @@ with tab_comp:
 
     if st.button("Generate Comprehensive", type="primary"):
         if not auth_token:
-            st.error("Please enter an Auth Token in the sidebar first.")
+            st.error(AUTH_TOKEN_MISSING)
             st.stop()
 
         valid_courses = [c for c in course_data if c["id"].strip()]
@@ -372,20 +429,138 @@ with tab_comp:
                     data = r.json()
                     st.session_state['current_job_id'] = data.get("job_id")
                     st.session_state['job_status'] = data.get("status")
-                    
+
                     if r.status_code == 200:
                         st.success(f"⚡ Instant Result! (Cache Hit/Cloned). Job ID: {data.get('job_id')}")
                         st.balloons()
                     else:
                         st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
-                        st.info("Go to 'View & Edit Result' tab to poll status.")
+                        st.info(POLL_STATUS_HINT)
                 else:
                     st.error(f"API Error ({r.status_code}): {r.text}")
             except Exception as e:
                 st.error(f"Connection Failed: {e}")
 
 # ==========================================
-# TAB 3: VIEW & EDIT
+# TAB 3: SCENARIO GENERATION
+# ==========================================
+with tab_scen:
+    st.markdown("### 🎭 Scenario Assessment Builder")
+    st.info(
+        "Generates scenario-based questions that test applied judgment, from a topic, "
+        "scenario domains and a target audience — no courses. Reference documents are "
+        "optional. Written-answer questions (open text, action planning, short answer) "
+        "come with a rubric whose criterion weights are percentages."
+    )
+
+    st.markdown("#### Scenario Setup")
+    sc_topic = st.text_input(
+        "Assessment topic *", placeholder="e.g. Leadership and conflict management",
+        key="sc_topic")
+    sc_domains = st.text_input(
+        "Scenario domains / topics * (comma-separated)",
+        placeholder="e.g. Team conflict, Ethical decisions, Stakeholder management",
+        key="sc_domains",
+        help="Questions are spread across these domains round-robin.")
+    sc_audience = st.text_input(
+        "Target audience *", placeholder="e.g. New district officers with 0–2 years of service",
+        key="sc_audience",
+        help="Learner group, role, experience or background — shapes every scenario.")
+    sc_areas = st.text_input(
+        "Key learning areas (optional, comma-separated)",
+        placeholder="e.g. Mediation, De-escalation", key="sc_areas")
+
+    st.markdown("#### Configuration")
+    s1, s2, s3 = st.columns(3)
+    sc_diff = s1.selectbox("Difficulty Level", ["beginner", "intermediate", "advanced"],
+                           index=1, key="sc_diff")
+    sc_lang = s2.selectbox("Output Language", LANGUAGES, key="sc_lang")
+    sc_time = s3.number_input("Time Limit (Minutes)", min_value=0, value=0, key="sc_time",
+                              help="0 means no limit.")
+    st.caption("Bloom's taxonomy does not apply — difficulty is defined by the reasoning "
+               "and judgment required.")
+
+    st.markdown(QUESTION_COUNTS_HEADING)
+    sc_cols = st.columns(len(SCENARIO_TYPE_CHOICES))
+    sc_counts = {
+        key: col.number_input(label, 0, 200, 2 if key in ("scenario_mcq", "open_text") else 0,
+                              key=f"sc_n_{key}")
+        for col, (label, key) in zip(sc_cols, SCENARIO_TYPE_CHOICES)
+    }
+    st.caption(f"Total questions: {sum(sc_counts.values())}")
+
+    sc_instructions = st.text_area("Additional instructions (optional)", key="sc_instr")
+    sc_transcripts = st.file_uploader("Reference transcripts (VTT/TXT/PDF/DOCX) — optional",
+                                      type=["vtt", "txt", "pdf", "docx"],
+                                      accept_multiple_files=True, key="sc_transcripts")
+    sc_files = st.file_uploader("Reference documents (PDF/DOCX) — optional",
+                                type=["pdf", "docx"], accept_multiple_files=True, key="sc_files")
+
+    if st.button("Generate Scenario Assessment", type="primary"):
+        if not auth_token:
+            st.error(AUTH_TOKEN_MISSING)
+            st.stop()
+        # Checked again by the API; caught here so the user does not wait for a 400.
+        missing = [name for name, value in (("Assessment topic", sc_topic),
+                                            ("Scenario domains", sc_domains),
+                                            ("Target audience", sc_audience))
+                   if not (value or "").strip()]
+        if missing:
+            st.error(f"Required: {', '.join(missing)}.")
+            st.stop()
+        if sum(sc_counts.values()) < 1:
+            st.error("Request at least one question.")
+            st.stop()
+
+        sc_payload = {
+            'force': 'true' if force_new else 'false',
+            'assessment_type': 'scenario',
+            'difficulty': sc_diff,
+            'language': sc_lang,
+            'question_type_counts': json.dumps({k: int(v) for k, v in sc_counts.items()}),
+            'assessment_topic': sc_topic.strip(),
+            'scenario_domains': sc_domains.strip(),
+            'target_audience': sc_audience.strip(),
+        }
+        if sc_areas.strip():
+            sc_payload['topic_names'] = sc_areas.strip()
+        if sc_time > 0:
+            sc_payload['time_limit'] = sc_time
+        if sc_instructions.strip():
+            sc_payload['additional_instructions'] = sc_instructions.strip()
+
+        sc_upload_mimes = {".pdf": PDF_MIME, ".docx": DOCX_MIME,
+                           ".vtt": "text/vtt", ".txt": "text/plain"}
+        sc_upload = []
+        for field, uploads in (("transcript_files", sc_transcripts), ("files", sc_files)):
+            for f in uploads or []:
+                mime = sc_upload_mimes.get(os.path.splitext(f.name)[1].lower(),
+                                           "application/octet-stream")
+                sc_upload.append((field, (f.name, f.getvalue(), mime)))
+
+        with st.expander("Request sent to POST /generate"):
+            st.json(sc_payload)
+
+        with st.spinner("Calling API (Scenario)..."):
+            try:
+                r = requests.post(f"{API_V1}/generate", data=sc_payload, files=sc_upload,
+                                  headers=get_headers())
+                if r.status_code in [200, 202]:
+                    data = r.json()
+                    st.session_state['current_job_id'] = data.get("job_id")
+                    st.session_state['job_status'] = data.get("status")
+                    if data.get("status") == "COMPLETED":
+                        st.success(f"⚡ Instant Result! (Cache Hit/Cloned). Job ID: {data.get('job_id')}")
+                    else:
+                        st.info(f"⏳ Job Started (Async). Job ID: {data.get('job_id')}")
+                        st.info(POLL_STATUS_HINT)
+                else:
+                    st.error(f"API Error ({r.status_code}): {r.text}")
+            except Exception as e:
+                st.error(f"Connection Failed: {e}")
+
+# ==========================================
+# TAB 4: VIEW & EDIT
 # ==========================================
 with tab_view:
     job_id = st.text_input("Job ID", value=st.session_state.get('current_job_id', ''))
@@ -589,6 +764,33 @@ with tab_view:
                 if m3.button("🔄 Reload from backend"):
                     st.rerun()
 
+                with st.expander("📐 Blueprint (as stored)"):
+                    st.json(assessment_data.get("blueprint") or {}, expanded=True)
+
+                # Temporary: the planner's output, saved in the job metadata when
+                # a scenario assessment went through the planned parallel path.
+                _plan = (data.get("metadata") or {}).get("scenario_plan") or []
+                if _plan:
+                    with st.expander(f"🗺️ Scenario plan — planner output ({len(_plan)} slots)"):
+                        st.caption("The seed the planning call gave each question slot before any "
+                                   "question was written. The batch designs the scenario from it.")
+                        st.dataframe(
+                            [
+                                {
+                                    "Slot": p.get("slot"),
+                                    "Type": p.get("type"),
+                                    "Domain": p.get("domain"),
+                                    "Learner": p.get("learner"),
+                                    "Setting": p.get("setting"),
+                                    "Trigger": p.get("trigger"),
+                                    "Roles": p.get("roles"),
+                                }
+                                for p in _plan
+                            ],
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
                 # ---------- add a question ----------
                 # Course choices for this assessment — the same names the LLM was
                 # given at generation time (aggregated metadata's `courses`, or the
@@ -603,161 +805,281 @@ with tab_view:
                 ] or [n for n in (_add_meta.get("course_names") or []) if n]
                 course_options = list(dict.fromkeys(_course_opts))  # de-dup, keep order
 
-                with st.expander("➕ Add a question (POST /questions/create/{job_id})"):
-                    with st.form("add_question_form"):
-                        a1, a2 = st.columns(2)
-                        QUESTION_TYPE_CHOICES = [
-                            ("Single selection MCQs", "mcq"),
-                            ("Fill in the blanks", "ftb"),
-                            ("Match the following", "mtf"),
-                            ("True/False", "truefalse"),
-                            ("Multiple selection MCQs", "multichoice"),
-                        ]
-                        new_type_label = a1.selectbox(
-                            "Question type",
-                            [label for label, _ in QUESTION_TYPE_CHOICES],
-                            key="add_type",
-                        )
-                        new_type = dict(QUESTION_TYPE_CHOICES)[new_type_label]
-                        new_pos = a2.number_input(
-                            "Position (1-based, blank = append)", min_value=0,
-                            max_value=len(q_list) + 1, value=0, key="add_pos",
-                        )
-                        new_text = st.text_area("Question text / matching context", key="add_text")
-                        st.caption(
-                            "MCQ, FTB and Multi-Choice require 2 to 5 options. "
-                            "FTB question text must contain exactly one blank (`___`). "
-                            "MTF requires at least 2 pairs (one per line as `left | right`)."
-                        )
-                        new_opts = st.text_area(
-                            "Options (one per line, 2 to 5) — or MTF pairs as `left | right`",
-                            key="add_opts",
-                        )
-                        new_correct = st.text_input(
-                            "Correct answer — MCQ / FTB: 0-based index · Multi-Choice: "
-                            "comma-separated indexes · True/False: True or False",
-                            key="add_correct",
-                        )
-                        st.markdown("**Answer rationale**")
-                        new_rationale = st.text_area(
-                            "Correct answer explanation (required)", key="add_rat")
-                        ar1, ar2 = st.columns(2)
-                        new_why = ar1.text_input("Why factor", key="add_why")
-                        new_logic = ar2.text_input("Logic justification", key="add_logic")
+                # A scenario assessment holds only the six scenario types, so it
+                # gets its own add form; every other assessment keeps the
+                # standard one below.
+                scenario_mode = is_scenario_assessment(assessment_data)
+                if scenario_mode:
+                    _sc_cfg = (_add_meta.get("config") or {})
+                    _sc_domains = _sc_cfg.get("scenario_domains") or []
+                    with st.expander("➕ Add a scenario question (POST /questions/create/{job_id})"):
+                        with st.form("add_scenario_question_form"):
+                            sa1, sa2 = st.columns(2)
+                            sc_new_label = sa1.selectbox(
+                                "Question type", [label for label, _ in SCENARIO_TYPE_CHOICES],
+                                key="sc_add_type")
+                            sc_new_type = dict(SCENARIO_TYPE_CHOICES)[sc_new_label]
+                            sc_new_pos = sa2.number_input(
+                                "Position (1-based, 0 = append)", min_value=0,
+                                max_value=len(q_list) + 1, value=0, key="sc_add_pos")
 
-                        st.markdown("**Classification**")
-                        ac1, ac2, ac3 = st.columns(3)
-                        new_blooms = ac1.selectbox("Bloom's level", BLOOMS, key="add_blooms")
-                        new_difficulty = pick(
-                            "Difficulty level", DIFFICULTIES, "", "add_diff", container=ac2,
-                            help="Drives the QuestionTagging column of the CSV export. "
-                                 "Left unset, that export falls back to Medium.")
-                        new_relevance = ac3.slider("Relevance %", 0, 100, 80, key="add_rel")
-
-                        st.markdown("**Mapping**")
-                        if len(course_options) == 1:
-                            new_course = course_options[0]
-                            st.text_input("Course name", value=new_course,
-                                         key="add_course", disabled=True,
-                                         help="Auto-populated — this assessment has only one course.")
-                        elif len(course_options) > 1:
-                            new_course = st.selectbox("Course name", course_options, key="add_course")
-                        else:
-                            new_course = st.text_input("Course name", key="add_course")
-                        new_lo = st.text_area("Learning outcome", key="add_lo")
-                        st.caption(
-                            "Competency area, theme and sub-theme are validated as a set — "
-                            "supply all three, or none.")
-                        mc1, mc2, mc3 = st.columns(3)
-                        new_area = mc1.text_input("Competency area", key="add_ka")
-                        new_theme = mc2.text_input("Competency theme", key="add_kt")
-                        new_sub = mc3.text_input("Competency sub-theme", key="add_ks")
-                        new_domain = st.text_input("Competency domain", key="add_kd")
-
-                        if st.form_submit_button("Add question"):
-                            payload_q = {
-                                "blooms_level": new_blooms,
-                                "relevance_percentage": int(new_relevance),
-                                "answer_rationale": {
-                                    "correct_answer_explanation": new_rationale,
-                                    "why_factor": new_why,
-                                    "logic_justification": new_logic,
-                                },
-                            }
-                            if new_difficulty:
-                                payload_q["difficulty_level"] = new_difficulty
-                            if new_course:
-                                payload_q["course_name"] = new_course
-
-                            # The add endpoint takes `reasoning` as one object, so
-                            # it is assembled here from whatever was filled in. A
-                            # partially filled competency triple is sent as-is
-                            # rather than dropped, so the backend reports the
-                            # incomplete mapping instead of the UI hiding it.
-                            kcm = {k: v for k, v in (
-                                ("competency_area", new_area.strip()),
-                                ("competency_theme", new_theme.strip()),
-                                ("competency_sub_theme", new_sub.strip()),
-                            ) if v}
-                            alignment = {}
-                            if kcm:
-                                alignment["kcm"] = kcm
-                            if new_domain.strip():
-                                alignment["domain"] = new_domain.strip()
-                            reasoning = {}
-                            if new_lo.strip():
-                                reasoning["learning_objective_alignment"] = new_lo.strip()
-                            if alignment:
-                                reasoning["competency_alignment"] = alignment
-                            if reasoning:
-                                payload_q["reasoning"] = reasoning
-
-                            lines = [l.strip() for l in new_opts.splitlines() if l.strip()]
-                            if new_type == "mtf":
-                                payload_q["matching_context"] = new_text
-                                payload_q["pairs"] = [
-                                    {"left": l.split("|")[0].strip(),
-                                     "right": l.split("|", 1)[1].strip() if "|" in l else ""}
-                                    for l in lines
-                                ]
+                            st.markdown("**Scenario**")
+                            sc_new_title = st.text_input("Scenario title", key="sc_add_title")
+                            sc_new_desc = st.text_area("Scenario description", key="sc_add_desc")
+                            sc_new_cons = st.text_area("Constraints (one per line, optional)",
+                                                       key="sc_add_cons")
+                            sd1, sd2 = st.columns(2)
+                            if _sc_domains:
+                                sc_new_domain = sd1.selectbox(LABEL_SCENARIO_DOMAIN, _sc_domains,
+                                                              key="sc_add_domain")
                             else:
-                                payload_q["question_text"] = new_text
-                                if new_type in ("mcq", "ftb", "multichoice"):
-                                    payload_q["options"] = [
-                                        {"text": t, "index": i} for i, t in enumerate(lines)
-                                    ]
-                                    if new_type in ("mcq", "ftb"):
-                                        try:
-                                            payload_q["correct_option_index"] = int(new_correct)
-                                        except ValueError:
-                                            payload_q["correct_option_index"] = None
-                                    else:
-                                        payload_q["correct_option_index"] = [
-                                            int(x) for x in new_correct.split(",") if x.strip().isdigit()
-                                        ]
-                                else:
-                                    payload_q["correct_answer"] = new_correct
+                                sc_new_domain = sd1.text_input(LABEL_SCENARIO_DOMAIN, key="sc_add_domain")
+                            sc_new_diff = sd2.text_input(LABEL_DIFFICULTY_LEVEL,
+                                                         _sc_cfg.get("difficulty") or "",
+                                                         key="sc_add_diff")
 
-                            body = {"questionType": new_type, "question": payload_q,
-                                    "version": version}
-                            if new_pos:
-                                body["position"] = int(new_pos)
-                            try:
-                                r_add = requests.post(f"{Q}/create/{job_id}",
-                                                      json={"request": body},
-                                                      headers=get_headers())
-                                if r_add.status_code == 201:
-                                    res = r_add.json()
-                                    total = res.get("total_questions", 0)
-                                    st.success(f"Added as {res['question_id']} "
-                                               f"(version {res['version']})")
-                                    st.caption(announce_added(
-                                        int(new_pos) if new_pos else total, total))
-                                    st.rerun()
+                            st.markdown("**Question**")
+                            sc_new_text = st.text_area(
+                                "Question text (short answer: one focused point, ending "
+                                "'Answer in 1 to 3 sentences.')", key="sc_add_text")
+
+                            st.markdown("**Answer key** — fill in the fields for the chosen type")
+                            st.caption(
+                                "Scenario MCQ / multi select: 2 to 5 options. "
+                                "Ranking: 2 to 6 actions, ranked by their 0-based index.")
+                            sc_new_opts = st.text_area(
+                                "Options / actions (one per line)", key="sc_add_opts")
+                            sc_new_correct = st.text_input(
+                                "Correct — MCQ: one 0-based index · multi select: comma-separated "
+                                "indexes · ranking: every index, most effective first (e.g. 2,0,3,1)",
+                                key="sc_add_correct")
+                            sc_new_answer = st.text_area(
+                                "Reference answer (open text) / expected answer (short answer)",
+                                key="sc_add_answer")
+                            sc_new_points = st.text_area(
+                                "Expected components (action planning) — one per line",
+                                key="sc_add_points")
+                            sc_new_rubric = st.text_area(
+                                "Rubric (JSON — open text, short answer, action planning). "
+                                "Weights are percentages that add up to 100.",
+                                json.dumps(RUBRIC_TEMPLATE, indent=2), height=220,
+                                key="sc_add_rubric")
+                            sc_new_rat = st.text_area("Rationale (required)", key="sc_add_rat")
+
+                            if st.form_submit_button("Add question"):
+                                q_new = {
+                                    "scenario": {"title": sc_new_title,
+                                                 "description": sc_new_desc,
+                                                 "constraints": lines_of(sc_new_cons)},
+                                    "scenario_domain": sc_new_domain,
+                                    "difficulty_level": sc_new_diff,
+                                    "question_text": sc_new_text,
+                                    "answer_rationale": {"correct_answer_explanation": sc_new_rat},
+                                }
+                                opts = lines_of(sc_new_opts)
+                                indexes = parse_indexes(sc_new_correct)
+                                if sc_new_type in ("scenario_mcq", "scenario_multiselect", "sjt_ranking"):
+                                    q_new["options"] = [{"text": t, "index": i}
+                                                        for i, t in enumerate(opts)]
+                                if sc_new_type == "scenario_mcq":
+                                    q_new["correct_option_index"] = indexes[0] if indexes else None
+                                elif sc_new_type == "scenario_multiselect":
+                                    q_new["correct_option_index"] = indexes
+                                elif sc_new_type == "sjt_ranking":
+                                    q_new["correct_ranking"] = indexes
+                                elif sc_new_type == "open_text":
+                                    q_new["reference_answer"] = sc_new_answer
+                                elif sc_new_type == "short_answer":
+                                    q_new["expected_answer"] = sc_new_answer
+                                elif sc_new_type == "action_planning":
+                                    q_new["expected_components"] = lines_of(sc_new_points)
+
+                                rubric_ok = True
+                                if sc_new_type in ("open_text", "short_answer", "action_planning"):
+                                    try:
+                                        q_new["rubric"] = json.loads(sc_new_rubric)
+                                    except json.JSONDecodeError as exc:
+                                        rubric_ok = False
+                                        st.error(f"Rubric is not valid JSON: {exc}")
+
+                                if rubric_ok:
+                                    sc_body = {"questionType": sc_new_type, "question": q_new,
+                                               "version": version}
+                                    if sc_new_pos:
+                                        sc_body["position"] = int(sc_new_pos)
+                                    try:
+                                        r_add = requests.post(f"{Q}/create/{job_id}",
+                                                              json={"request": sc_body},
+                                                              headers=get_headers())
+                                        if r_add.status_code == 201:
+                                            res = r_add.json()
+                                            total = res.get("total_questions", 0)
+                                            st.success(f"Added as {res['question_id']} "
+                                                       f"(version {res['version']})")
+                                            st.caption(announce_added(
+                                                int(sc_new_pos) if sc_new_pos else total, total))
+                                            st.rerun()
+                                        else:
+                                            show_api_error(r_add, "Add failed")
+                                    except Exception as e:
+                                        st.error(f"Add error: {e}")
+
+                if not scenario_mode:
+                    with st.expander("➕ Add a question (POST /questions/create/{job_id})"):
+                        with st.form("add_question_form"):
+                            a1, a2 = st.columns(2)
+                            QUESTION_TYPE_CHOICES = [
+                                ("Single selection MCQs", "mcq"),
+                                ("Fill in the blanks", "ftb"),
+                                ("Match the following", "mtf"),
+                                ("True/False", "truefalse"),
+                                ("Multiple selection MCQs", "multichoice"),
+                            ]
+                            new_type_label = a1.selectbox(
+                                "Question type",
+                                [label for label, _ in QUESTION_TYPE_CHOICES],
+                                key="add_type",
+                            )
+                            new_type = dict(QUESTION_TYPE_CHOICES)[new_type_label]
+                            new_pos = a2.number_input(
+                                "Position (1-based, blank = append)", min_value=0,
+                                max_value=len(q_list) + 1, value=0, key="add_pos",
+                            )
+                            new_text = st.text_area("Question text / matching context", key="add_text")
+                            st.caption(
+                                "MCQ, FTB and Multi-Choice require 2 to 5 options. "
+                                "FTB question text must contain exactly one blank (`___`). "
+                                "MTF requires at least 2 pairs (one per line as `left | right`)."
+                            )
+                            new_opts = st.text_area(
+                                "Options (one per line, 2 to 5) — or MTF pairs as `left | right`",
+                                key="add_opts",
+                            )
+                            new_correct = st.text_input(
+                                "Correct answer — MCQ / FTB: 0-based index · Multi-Choice: "
+                                "comma-separated indexes · True/False: True or False",
+                                key="add_correct",
+                            )
+                            st.markdown("**Answer rationale**")
+                            new_rationale = st.text_area(
+                                "Correct answer explanation (required)", key="add_rat")
+                            ar1, ar2 = st.columns(2)
+                            new_why = ar1.text_input("Why factor", key="add_why")
+                            new_logic = ar2.text_input("Logic justification", key="add_logic")
+
+                            st.markdown("**Classification**")
+                            ac1, ac2, ac3 = st.columns(3)
+                            new_blooms = ac1.selectbox("Bloom's level", BLOOMS, key="add_blooms")
+                            new_difficulty = pick(
+                                LABEL_DIFFICULTY_LEVEL, DIFFICULTIES, "", "add_diff", container=ac2,
+                                help="Drives the QuestionTagging column of the CSV export. "
+                                     "Left unset, that export falls back to Medium.")
+                            new_relevance = ac3.slider("Relevance %", 0, 100, 80, key="add_rel")
+
+                            st.markdown("**Mapping**")
+                            if len(course_options) == 1:
+                                new_course = course_options[0]
+                                st.text_input("Course name", value=new_course,
+                                             key="add_course", disabled=True,
+                                             help="Auto-populated — this assessment has only one course.")
+                            elif len(course_options) > 1:
+                                new_course = st.selectbox("Course name", course_options, key="add_course")
+                            else:
+                                new_course = st.text_input("Course name", key="add_course")
+                            new_lo = st.text_area("Learning outcome", key="add_lo")
+                            st.caption(
+                                "Competency area, theme and sub-theme are validated as a set — "
+                                "supply all three, or none.")
+                            mc1, mc2, mc3 = st.columns(3)
+                            new_area = mc1.text_input("Competency area", key="add_ka")
+                            new_theme = mc2.text_input("Competency theme", key="add_kt")
+                            new_sub = mc3.text_input("Competency sub-theme", key="add_ks")
+                            new_domain = st.text_input("Competency domain", key="add_kd")
+
+                            if st.form_submit_button("Add question"):
+                                payload_q = {
+                                    "blooms_level": new_blooms,
+                                    "relevance_percentage": int(new_relevance),
+                                    "answer_rationale": {
+                                        "correct_answer_explanation": new_rationale,
+                                        "why_factor": new_why,
+                                        "logic_justification": new_logic,
+                                    },
+                                }
+                                if new_difficulty:
+                                    payload_q["difficulty_level"] = new_difficulty
+                                if new_course:
+                                    payload_q["course_name"] = new_course
+
+                                # The add endpoint takes `reasoning` as one object, so
+                                # it is assembled here from whatever was filled in. A
+                                # partially filled competency triple is sent as-is
+                                # rather than dropped, so the backend reports the
+                                # incomplete mapping instead of the UI hiding it.
+                                kcm = {k: v for k, v in (
+                                    ("competency_area", new_area.strip()),
+                                    ("competency_theme", new_theme.strip()),
+                                    ("competency_sub_theme", new_sub.strip()),
+                                ) if v}
+                                alignment = {}
+                                if kcm:
+                                    alignment["kcm"] = kcm
+                                if new_domain.strip():
+                                    alignment["domain"] = new_domain.strip()
+                                reasoning = {}
+                                if new_lo.strip():
+                                    reasoning["learning_objective_alignment"] = new_lo.strip()
+                                if alignment:
+                                    reasoning["competency_alignment"] = alignment
+                                if reasoning:
+                                    payload_q["reasoning"] = reasoning
+
+                                lines = [l.strip() for l in new_opts.splitlines() if l.strip()]
+                                if new_type == "mtf":
+                                    payload_q["matching_context"] = new_text
+                                    payload_q["pairs"] = [
+                                        {"left": l.split("|")[0].strip(),
+                                         "right": l.split("|", 1)[1].strip() if "|" in l else ""}
+                                        for l in lines
+                                    ]
                                 else:
-                                    show_api_error(r_add, "Add failed")
-                            except Exception as e:
-                                st.error(f"Add error: {e}")
+                                    payload_q["question_text"] = new_text
+                                    if new_type in ("mcq", "ftb", "multichoice"):
+                                        payload_q["options"] = [
+                                            {"text": t, "index": i} for i, t in enumerate(lines)
+                                        ]
+                                        if new_type in ("mcq", "ftb"):
+                                            try:
+                                                payload_q["correct_option_index"] = int(new_correct)
+                                            except ValueError:
+                                                payload_q["correct_option_index"] = None
+                                        else:
+                                            payload_q["correct_option_index"] = [
+                                                int(x) for x in new_correct.split(",") if x.strip().isdigit()
+                                            ]
+                                    else:
+                                        payload_q["correct_answer"] = new_correct
+
+                                body = {"questionType": new_type, "question": payload_q,
+                                        "version": version}
+                                if new_pos:
+                                    body["position"] = int(new_pos)
+                                try:
+                                    r_add = requests.post(f"{Q}/create/{job_id}",
+                                                          json={"request": body},
+                                                          headers=get_headers())
+                                    if r_add.status_code == 201:
+                                        res = r_add.json()
+                                        total = res.get("total_questions", 0)
+                                        st.success(f"Added as {res['question_id']} "
+                                                   f"(version {res['version']})")
+                                        st.caption(announce_added(
+                                            int(new_pos) if new_pos else total, total))
+                                        st.rerun()
+                                    else:
+                                        show_api_error(r_add, "Add failed")
+                                except Exception as e:
+                                    st.error(f"Add error: {e}")
 
                 # ---------- Questions in assessment order ----------
                 st.markdown("#### Questions (in assessment order)")
@@ -877,17 +1199,35 @@ with tab_view:
                                     new_pairs.append({"left": extra_left, "right": extra_right})
                                 updates["pairs"] = new_pairs
                             else:
+                                if bucket in SCENARIO_BUCKETS:
+                                    # Scenario block — edited by dotted path, so an
+                                    # untouched part is pruned and never sent.
+                                    sc = q.get("scenario") or {}
+                                    st.markdown("**Scenario**")
+                                    updates["scenario.title"] = st.text_input(
+                                        "Scenario title", sc.get("title", "") or "",
+                                        key=f"sct_{qkey}")
+                                    updates["scenario.description"] = st.text_area(
+                                        "Scenario description", sc.get("description", "") or "",
+                                        key=f"scd_{qkey}")
+                                    updates["scenario.constraints"] = lines_of(st.text_area(
+                                        "Constraints (one per line)",
+                                        "\n".join(sc.get("constraints") or []),
+                                        key=f"scc_{qkey}"))
                                 updates["question_text"] = st.text_area(
                                     "Question text", q.get("question_text", ""),
                                     key=f"qt_{qkey}")
 
                             # Options / answer key. An option FTB is edited exactly
                             # like a single-select MCQ; a legacy FTB (no options)
-                            # keeps its text answer below.
-                            single_select = (bucket == "Multiple Choice Question"
+                            # keeps its text answer below. Scenario MCQ and multi
+                            # select are edited exactly like their standard types.
+                            single_select = (bucket in ("Multiple Choice Question",
+                                                        BUCKET_SCENARIO_MCQ)
                                              or (bucket == "FTB Question"
                                                  and not q.get("legacy_ftb")))
-                            if single_select or bucket == "Multi-Choice Question":
+                            if single_select or bucket in ("Multi-Choice Question",
+                                                           BUCKET_SCENARIO_MULTISELECT):
                                 options = q.get("options", [])
                                 st.caption(
                                     f"Options — at least 2 are required "
@@ -1031,67 +1371,140 @@ with tab_view:
                                 updates["correct_answer"] = st.text_input(
                                     "Correct answer", q.get("correct_answer", "") or "",
                                     key=f"ftb_{qkey}")
+                            elif bucket == BUCKET_RANKING:
+                                # Action texts are edited in place (indexes kept), and
+                                # the ranking is the list of indexes, best first.
+                                options = q.get("options", [])
+                                st.caption("Actions — 2 to 6. The correct ranking lists "
+                                           "their indexes from most to least effective.")
+                                new_options = []
+                                for oi, opt in enumerate(options):
+                                    idx = opt.get("index", oi)
+                                    new_options.append({"text": st.text_input(
+                                        f"Action [{idx}]", opt.get("text", ""),
+                                        key=f"rk_opt_{qkey}_{oi}"), "index": idx})
+                                updates["options"] = new_options
+                                ranking_text = st.text_input(
+                                    "Correct ranking (indexes, most effective first)",
+                                    ", ".join(str(i) for i in q.get("correct_ranking") or []),
+                                    key=f"rk_{qkey}")
+                                updates["correct_ranking"] = parse_indexes(ranking_text)
+                                text_by_idx = {o["index"]: o["text"] for o in new_options}
+                                st.caption("Reads as: " + " > ".join(
+                                    f"[{i}] {(text_by_idx.get(i) or '?')[:30]}"
+                                    for i in updates["correct_ranking"]))
+                            elif bucket in RUBRIC_BUCKETS:
+                                if bucket == BUCKET_OPEN_TEXT:
+                                    updates["reference_answer"] = st.text_area(
+                                        "Reference answer", q.get("reference_answer", "") or "",
+                                        key=f"ref_{qkey}")
+                                elif bucket == BUCKET_SHORT_ANSWER:
+                                    updates["expected_answer"] = st.text_area(
+                                        "Expected answer", q.get("expected_answer", "") or "",
+                                        key=f"exp_{qkey}")
+                                if bucket == BUCKET_ACTION_PLANNING:
+                                    updates["expected_components"] = lines_of(st.text_area(
+                                        "Expected components (one per line)",
+                                        "\n".join(q.get("expected_components") or []),
+                                        key=f"comp_{qkey}"))
+
+                                # The rubric is edited as JSON — it is a grid of
+                                # criteria x anchors, saved as one field.
+                                rubric = q.get("rubric") or []
+                                st.markdown("**Rubric** — any number of criteria; weights are "
+                                            "percentages that must add up to 100, and every "
+                                            "criterion needs anchors 0 to 3.")
+                                if rubric:
+                                    st.dataframe(pd.DataFrame([{
+                                        "Criterion": c.get("criterion"),
+                                        "Weight %": c.get("weight_percent"),
+                                        **{f"{lv}": (c.get("score_anchors") or {}).get(lv)
+                                           for lv in ("0", "1", "2", "3")},
+                                        "Evidence": "; ".join(c.get("evidence_indicators") or []),
+                                    } for c in rubric if isinstance(c, dict)]),
+                                        width="stretch", hide_index=True)
+                                rubric_text = st.text_area(
+                                    "Rubric (JSON)", json.dumps(rubric, indent=2,
+                                                                ensure_ascii=False),
+                                    height=260, key=f"rub_{qkey}")
+                                try:
+                                    updates["rubric"] = json.loads(rubric_text)
+                                except json.JSONDecodeError as exc:
+                                    st.error(f"Rubric is not valid JSON — it will not be "
+                                             f"saved until fixed: {exc}")
 
                             # Rationale
                             ar = q.get("answer_rationale") or {}
                             updates["answer_rationale.correct_answer_explanation"] = st.text_area(
                                 "Rationale — correct answer explanation",
                                 ar.get("correct_answer_explanation", "") or "", key=f"ar1_{qkey}")
-                            updates["answer_rationale.why_factor"] = st.text_input(
-                                "Rationale — why factor", ar.get("why_factor", "") or "",
-                                key=f"ar2_{qkey}")
-                            updates["answer_rationale.logic_justification"] = st.text_input(
-                                "Rationale — logic justification",
-                                ar.get("logic_justification", "") or "", key=f"ar3_{qkey}")
+                            if bucket not in SCENARIO_BUCKETS:
+                                updates["answer_rationale.why_factor"] = st.text_input(
+                                    "Rationale — why factor", ar.get("why_factor", "") or "",
+                                    key=f"ar2_{qkey}")
+                                updates["answer_rationale.logic_justification"] = st.text_input(
+                                    "Rationale — logic justification",
+                                    ar.get("logic_justification", "") or "", key=f"ar3_{qkey}")
+                            else:
+                                # Scenario classification — no Bloom's, relevance,
+                                # KCM or course on a scenario question.
+                                sc1, sc2 = st.columns(2)
+                                updates["scenario_domain"] = sc1.text_input(
+                                    LABEL_SCENARIO_DOMAIN, q.get("scenario_domain", "") or "",
+                                    key=f"sdom_{qkey}")
+                                updates["difficulty_level"] = sc2.text_input(
+                                    LABEL_DIFFICULTY_LEVEL, q.get("difficulty_level", "") or "",
+                                    key=f"sdf_{qkey}")
 
-                            # Bloom's level, difficulty, relevance
-                            bc1, bc2, bc3 = st.columns(3)
-                            updates["blooms_level"] = pick(
-                                "Bloom's level", BLOOMS, q.get("blooms_level"),
-                                f"bl_{qkey}", container=bc1)
-                            updates["difficulty_level"] = pick(
-                                "Difficulty level", DIFFICULTIES, q.get("difficulty_level"),
-                                f"df_{qkey}", container=bc2,
-                                help="Drives the QuestionTagging column of the CSV export. "
-                                     "Left unset, that export falls back to Medium.")
-                            updates["relevance_percentage"] = bc3.slider(
-                                "Relevance %", 0, 100,
-                                int(q.get("relevance_percentage") or 0), key=f"rl_{qkey}")
+                            if bucket not in SCENARIO_BUCKETS:
+                                # Bloom's level, difficulty, relevance
+                                bc1, bc2, bc3 = st.columns(3)
+                                updates["blooms_level"] = pick(
+                                    "Bloom's level", BLOOMS, q.get("blooms_level"),
+                                    f"bl_{qkey}", container=bc1)
+                                updates["difficulty_level"] = pick(
+                                    LABEL_DIFFICULTY_LEVEL, DIFFICULTIES, q.get("difficulty_level"),
+                                    f"df_{qkey}", container=bc2,
+                                    help="Drives the QuestionTagging column of the CSV export. "
+                                         "Left unset, that export falls back to Medium.")
+                                updates["relevance_percentage"] = bc3.slider(
+                                    "Relevance %", 0, 100,
+                                    int(q.get("relevance_percentage") or 0), key=f"rl_{qkey}")
 
-                            # Learning outcome, competency, course mapping
-                            rs = q.get("reasoning") or {}
-                            kcm = (rs.get("competency_alignment") or {}).get("kcm") or {}
-                            updates["reasoning.learning_objective_alignment"] = st.text_area(
-                                "Learning outcome", rs.get("learning_objective_alignment", "") or "",
-                                key=f"lo_{qkey}")
-                            st.caption(
-                                "Competency mapping — area, theme and sub-theme are "
-                                "validated together against the KCM dataset, so change "
-                                "them as a set.")
-                            k1, k2, k3 = st.columns(3)
-                            updates["reasoning.competency_alignment.kcm.competency_area"] = \
-                                k1.text_input("Competency area",
-                                              kcm.get("competency_area", "") or "", key=f"ka_{qkey}")
-                            updates["reasoning.competency_alignment.kcm.competency_theme"] = \
-                                k2.text_input("Competency theme",
-                                              kcm.get("competency_theme", "") or "", key=f"kt_{qkey}")
-                            updates["reasoning.competency_alignment.kcm.competency_sub_theme"] = \
-                                k3.text_input("Competency sub-theme",
-                                              kcm.get("competency_sub_theme", "") or "",
-                                              key=f"ks_{qkey}")
-                            updates["reasoning.competency_alignment.domain"] = st.text_input(
-                                "Competency domain",
-                                (rs.get("competency_alignment") or {}).get("domain", "") or "",
-                                key=f"kd_{qkey}")
-                            updates["course_name"] = st.text_input(
-                                "Course mapping", q.get("course_name", "") or "", key=f"cn_{qkey}")
+                                # Learning outcome, competency, course mapping
+                                rs = q.get("reasoning") or {}
+                                kcm = (rs.get("competency_alignment") or {}).get("kcm") or {}
+                                updates["reasoning.learning_objective_alignment"] = st.text_area(
+                                    "Learning outcome", rs.get("learning_objective_alignment", "") or "",
+                                    key=f"lo_{qkey}")
+                                st.caption(
+                                    "Competency mapping — area, theme and sub-theme are "
+                                    "validated together against the KCM dataset, so change "
+                                    "them as a set.")
+                                k1, k2, k3 = st.columns(3)
+                                updates["reasoning.competency_alignment.kcm.competency_area"] = \
+                                    k1.text_input("Competency area",
+                                                  kcm.get("competency_area", "") or "", key=f"ka_{qkey}")
+                                updates["reasoning.competency_alignment.kcm.competency_theme"] = \
+                                    k2.text_input("Competency theme",
+                                                  kcm.get("competency_theme", "") or "", key=f"kt_{qkey}")
+                                updates["reasoning.competency_alignment.kcm.competency_sub_theme"] = \
+                                    k3.text_input("Competency sub-theme",
+                                                  kcm.get("competency_sub_theme", "") or "",
+                                                  key=f"ks_{qkey}")
+                                updates["reasoning.competency_alignment.domain"] = st.text_input(
+                                    "Competency domain",
+                                    (rs.get("competency_alignment") or {}).get("domain", "") or "",
+                                    key=f"kd_{qkey}")
+                                updates["course_name"] = st.text_input(
+                                    "Course mapping", q.get("course_name", "") or "", key=f"cn_{qkey}")
 
-                            # Everything else the API returns for this question.
-                            # The identifiers are server-owned, and the generator's
-                            # justification narrative is readable but not writable
-                            # through the editing endpoints — shown here so the
-                            # editor is a complete view of the question rather than
-                            # a partial one.
+                                # Everything else the API returns for this question.
+                                # The identifiers are server-owned, and the generator's
+                                # justification narrative is readable but not writable
+                                # through the editing endpoints — shown here so the
+                                # editor is a complete view of the question rather than
+                                # a partial one.
                             st.markdown("**Read-only fields** — returned by the API, "
                                         "not editable through it")
                             ro1, ro2 = st.columns(2)
@@ -1107,13 +1520,14 @@ with tab_view:
                                     f"remove "
                                     f"{'enabled' if q.get('can_remove_option') else 'disabled'}")
                             ro2.write(f"- `can_delete`: {q.get('can_delete')}")
-                            for rkey, rlabel in (
-                                ("blooms_level_justification", "Bloom's level justification"),
-                                ("difficulty_justification", "Difficulty justification"),
-                                ("question_type_rationale", "Question type rationale"),
-                                ("assessment_type_relevance", "Assessment type relevance"),
-                            ):
-                                st.caption(f"**{rlabel}** — {rs.get(rkey) or '—'}")
+                            if bucket not in SCENARIO_BUCKETS:
+                                for rkey, rlabel in (
+                                    ("blooms_level_justification", "Bloom's level justification"),
+                                    ("difficulty_justification", "Difficulty justification"),
+                                    ("question_type_rationale", "Question type rationale"),
+                                    ("assessment_type_relevance", "Assessment type relevance"),
+                                ):
+                                    st.caption(f"**{rlabel}** — {rs.get(rkey) or '—'}")
 
                             b1, b2, b3 = st.columns(3)
                             preview_clicked = b1.form_submit_button("👁️ Preview changes")
@@ -1241,7 +1655,7 @@ with tab_view:
                         st.error(f"Audit error: {e}")
 
 # ==========================================
-# TAB 3: HISTORY
+# TAB 5: HISTORY
 # ==========================================
 with tab_history:
     st.markdown("### 🗂️ Your Assessment History")
@@ -1271,7 +1685,10 @@ with tab_history:
             config = item.get("config", {})
             course_names = item.get("course_names", [])
             course_ids_list = item.get("course_ids", [])
-            course_label = ", ".join(course_names) if course_names else "Unknown Course"
+            if config.get("assessment_type") == "scenario" and config.get("assessment_topic"):
+                course_label = f"🎭 {config['assessment_topic']}"
+            else:
+                course_label = ", ".join(course_names) if course_names else "Unknown Course"
 
             # Status badge logic
             status_emoji = "⏳"
@@ -1303,6 +1720,11 @@ with tab_history:
                         st.write(f"- **Time Limit:** {config.get('time_limit', 0) or 'No limit'}")
                         if config.get('course_weightage'):
                             st.write(f"- **Course Weightage:** `{config.get('course_weightage')}`")
+                        if config.get('assessment_type') == 'scenario':
+                            st.write(f"- **Topic:** {config.get('assessment_topic') or 'N/A'}")
+                            st.write(f"- **Scenario Domains:** "
+                                     f"{', '.join(config.get('scenario_domains') or []) or 'N/A'}")
+                            st.write(f"- **Target Audience:** {config.get('target_audience') or 'N/A'}")
                     else:
                         st.write("No configuration metadata available (Legacy Job).")
                 

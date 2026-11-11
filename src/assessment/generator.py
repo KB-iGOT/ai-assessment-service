@@ -445,13 +445,10 @@ def case_study_levels(
     can look like 25% inside a small batch; deciding once, here, gives every
     batch and top-up call the same answer.
 
-    A level qualifies at CASE_STUDY_MIN_LEVEL_PCT or more of the total. Beginner
-    gets none: its difficulty rule limits any scenario to 2-3 sentences. This
+    A level qualifies at CASE_STUDY_MIN_LEVEL_PCT or more of the total. This
     only decides which levels MAY carry a case study — whether any question does
     is left to the model.
     """
-    if (difficulty_level or "").lower() == "beginner":
-        return []
     total = sum(level_weights.values())
     if total <= 0:
         return []
@@ -797,6 +794,10 @@ class GenerationRequest:
     competency_themes: Optional[str] = None
     competency_sub_themes: Optional[str] = None
     course_names: Optional[List[str]] = None
+    # Scenario assessments only.
+    assessment_topic: Optional[str] = None
+    scenario_domains: Optional[List[str]] = None
+    target_audience: Optional[str] = None
 
 
 async def generate_assessment(request: GenerationRequest) -> Tuple[Dict, Dict, Dict]:
@@ -804,6 +805,11 @@ async def generate_assessment(request: GenerationRequest) -> Tuple[Dict, Dict, D
     Generates assessment for one or multiple courses.
     Returns (aggregated_metadata, assessment_json, usage_metadata)
     """
+    if request.assessment_type == "scenario":
+        # Imported here: scenario.py builds on this module.
+        from .scenario import generate_scenario_assessment
+        return await generate_scenario_assessment(request)
+
     question_type_counts = request.question_type_counts
     course_folder = request.course_folder
     assessment_type = request.assessment_type
@@ -1385,6 +1391,7 @@ async def _generate_question_batch(
     schema: Dict[str, Any],
     batch: Batch,
     job_id: Optional[str],
+    llm_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Generate one batch, retrying on an unusable response.
@@ -1393,13 +1400,16 @@ async def _generate_question_batch(
     than with a single call — but equally, one bad response no longer has to lose
     the whole assessment. `call_llm`'s own retry covers server, quota and cache
     errors; this covers a response that arrived but cannot be used.
+
+    `llm_kwargs` is passed on to `call_llm` — the scenario path uses it to leave
+    out the KCM context cache.
     """
     attempts = max(1, BATCH_MAX_ATTEMPTS)
     last_error: Optional[Exception] = None
 
     for attempt in range(1, attempts + 1):
         try:
-            response_text, usage = await call_llm(prompt, schema=schema)
+            response_text, usage = await call_llm(prompt, schema=schema, **(llm_kwargs or {}))
             payload = json.loads(response_text)
             if not isinstance(payload, dict):
                 raise ValueError(f"Batch response was {type(payload).__name__}, expected an object")
@@ -1739,6 +1749,7 @@ async def call_llm(
     prompt: str,
     *,
     schema: Optional[Dict[str, Any]] = None,
+    use_kcm_cache: bool = True,
 ) -> Tuple[str, Dict[str, Any]]:
     global _active_kcm_cache
     if not client:
@@ -1746,7 +1757,9 @@ async def call_llm(
 
     logger.info("Calling GenAI model: %s", GENAI_MODEL_NAME)
 
-    cache_name = await get_or_create_kcm_cache()
+    # The KCM descriptions are context for KCM-mapped assessments only; a
+    # scenario assessment has no KCM mapping and leaves them out.
+    cache_name = await get_or_create_kcm_cache() if use_kcm_cache else None
 
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
