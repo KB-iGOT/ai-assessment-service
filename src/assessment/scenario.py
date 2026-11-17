@@ -337,7 +337,12 @@ def _settle_difficulty(payload: Any, assigned_by_type: Dict[str, List[str]]) -> 
                 leftover.append(level)
         for question in unmatched:
             label = _norm(question.get("difficulty_level"))
-            new = leftover.pop(0) if leftover else (label if label in DIFFICULTY_LEVELS else assigned[0])
+            if leftover:
+                new = leftover.pop(0)
+            elif label in DIFFICULTY_LEVELS:
+                new = label
+            else:
+                new = assigned[0]
             if new != question.get("difficulty_level"):
                 changed.append(str(question.get("question_id") or "?"))
             question["difficulty_level"] = new

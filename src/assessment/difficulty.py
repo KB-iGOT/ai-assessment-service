@@ -341,7 +341,7 @@ def order_levels(
             domain = _norm(domains[i]) if i < len(domains) else ""
             level = min(
                 (lv for lv in DIFFICULTY_LEVELS if left.get(lv, 0) > 0),
-                key=lambda lv: (pairs[(domain, lv)], -left[lv], DIFFICULTY_LEVELS.index(lv)),
+                key=lambda lv, d=domain, rem=left: (pairs[(d, lv)], -rem[lv], DIFFICULTY_LEVELS.index(lv)),
             )
             left[level] -= 1
             pairs[(domain, level)] += 1
