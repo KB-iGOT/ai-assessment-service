@@ -146,6 +146,7 @@ def test_pdf_renders_every_scenario_question_in_order_with_its_scenario():
         assert "Two team members disagree about delayed participant data." in block
         assert "<li>Three-day deadline</li><li>Conflicting accounts</li>" in block
         assert "<b>Scenario Domain:</b> Team conflict" in block
+        assert "<b>Difficulty Level:</b> Intermediate" in block
         assert f"<b>Provenance:</b> {PROVENANCE_LABELS['ai_generated']}" in block
         # Standard-only fields have no place on a scenario question.
         assert "Source Course" not in block and "Bloom's Level" not in block
@@ -220,10 +221,29 @@ def test_docx_renders_every_scenario_question_with_its_answer_key(tmp_path):
         assert f"{number}. Question {qid}?" in text
     assert text.count("Scenario: Disagreement Over Training Data") == 6
     assert text.count("Scenario Domain: Team conflict") == 6
+    assert text.count("Difficulty Level: Intermediate") == 6
     for key in ANSWER_KEYS:
         assert key.replace("&gt;", ">") in text
     assert "Verify\nAssign\nFollow up" in text
     assert "Source Course" not in text
+
+
+def test_pdf_and_docx_show_each_questions_own_difficulty_level(tmp_path):
+    data = make_scenario_assessment()
+    data["questions"]["Scenario MCQ Question"][0]["difficulty_level"] = "advanced"
+    data["questions"]["Open Text Question"][0]["difficulty_level"] = "beginner"
+    del data["questions"]["Short Answer Question"][0]["difficulty_level"]
+
+    blocks = question_blocks(data)
+    assert "<b>Difficulty Level:</b> Advanced" in blocks[0]
+    assert "<b>Difficulty Level:</b> Beginner" in blocks[2]
+    assert "<b>Difficulty Level:</b> N/A" in blocks[5]
+
+    text = docx_text(docx_of(data, tmp_path))
+    assert [line for line in text.split("\n") if line.startswith("Difficulty Level:")] == [
+        "Difficulty Level: Advanced", "Difficulty Level: Intermediate", "Difficulty Level: Beginner",
+        "Difficulty Level: Intermediate", "Difficulty Level: Intermediate", "Difficulty Level: N/A",
+    ]
 
 
 def test_docx_has_a_rubric_table_for_each_written_question(tmp_path):

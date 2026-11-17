@@ -472,8 +472,11 @@ with tab_scen:
 
     st.markdown("#### Configuration")
     s1, s2, s3 = st.columns(3)
-    sc_diff = s1.selectbox("Difficulty Level", ["beginner", "intermediate", "advanced"],
-                           index=1, key="sc_diff")
+    sc_levels = s1.multiselect(
+        "Difficulty Level(s)", ["beginner", "intermediate", "advanced"],
+        default=["intermediate"], key="sc_levels",
+        help="Pick one or more. With several, questions are split evenly across them — "
+             "over the whole assessment first, then within each question type.")
     sc_lang = s2.selectbox("Output Language", LANGUAGES, key="sc_lang")
     sc_time = s3.number_input("Time Limit (Minutes)", min_value=0, value=0, key="sc_time",
                               help="0 means no limit.")
@@ -488,6 +491,17 @@ with tab_scen:
         for col, (label, key) in zip(sc_cols, SCENARIO_TYPE_CHOICES)
     }
     st.caption(f"Total questions: {sum(sc_counts.values())}")
+
+    # Optional exact split over the selected levels; left off, the API splits evenly.
+    sc_level_counts = {}
+    if len(sc_levels) > 1 and st.checkbox("Set the number of questions per difficulty level",
+                                          key="sc_level_split"):
+        sc_lcols = st.columns(len(sc_levels))
+        sc_level_counts = {
+            level: int(col.number_input(level.capitalize(), 0, 200, 0, key=f"sc_lv_{level}"))
+            for col, level in zip(sc_lcols, sc_levels)
+        }
+        st.caption(f"Assigned {sum(sc_level_counts.values())} of {sum(sc_counts.values())} questions.")
 
     sc_instructions = st.text_area("Additional instructions (optional)", key="sc_instr")
     sc_transcripts = st.file_uploader("Reference transcripts (VTT/TXT/PDF/DOCX) — optional",
@@ -511,17 +525,28 @@ with tab_scen:
         if sum(sc_counts.values()) < 1:
             st.error("Request at least one question.")
             st.stop()
+        if not sc_levels:
+            st.error("Select at least one difficulty level.")
+            st.stop()
+        if sc_level_counts and sum(sc_level_counts.values()) != sum(sc_counts.values()):
+            st.error("The questions per difficulty level must add up to the total questions.")
+            st.stop()
 
         sc_payload = {
             'force': 'true' if force_new else 'false',
             'assessment_type': 'scenario',
-            'difficulty': sc_diff,
             'language': sc_lang,
             'question_type_counts': json.dumps({k: int(v) for k, v in sc_counts.items()}),
             'assessment_topic': sc_topic.strip(),
             'scenario_domains': sc_domains.strip(),
             'target_audience': sc_audience.strip(),
         }
+        if len(sc_levels) == 1:
+            sc_payload['difficulty'] = sc_levels[0]
+        else:
+            sc_payload['difficulty_levels'] = ",".join(sc_levels)
+        if sc_level_counts:
+            sc_payload['difficulty_distribution'] = json.dumps(sc_level_counts)
         if sc_areas.strip():
             sc_payload['topic_names'] = sc_areas.strip()
         if sc_time > 0:
@@ -1710,7 +1735,9 @@ with tab_history:
                     st.markdown("**Configuration:**")
                     if config:
                         st.write(f"- **Type:** {config.get('assessment_type', 'N/A')}")
-                        st.write(f"- **Difficulty:** {config.get('difficulty', 'N/A')}")
+                        # A mixed-difficulty scenario has no single `difficulty`.
+                        mixed = config.get('difficulty_distribution') or config.get('difficulty_levels')
+                        st.write(f"- **Difficulty:** {mixed or config.get('difficulty') or 'N/A'}")
                         st.write(f"- **Language:** {config.get('language', 'N/A')}")
                         st.write(f"- **Total Questions:** {config.get('total_questions', 'N/A')}")
                         q_counts = config.get('question_type_counts', {})

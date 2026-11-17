@@ -128,6 +128,12 @@ def _rubric_rows(q: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [c for c in q.get("rubric") or [] if isinstance(c, dict)]
 
 
+def _difficulty_label(q: Dict[str, Any]) -> str:
+    """A question's own difficulty level for display — `advanced` becomes `Advanced`."""
+    level = " ".join(str(q.get("difficulty_level") or "").split())
+    return level.capitalize() if level else "N/A"
+
+
 def _scenario_question_html(number: int, bucket: str, q: Dict[str, Any]) -> str:
     e = lambda value: html.escape(str(value if value is not None else ""))  # noqa: E731
     parts = _scenario_parts(q)
@@ -178,6 +184,7 @@ def _scenario_question_html(number: int, bucket: str, q: Dict[str, Any]) -> str:
     box = [
         f"<b>Rationale:</b> {e(ar.get('correct_answer_explanation') or 'N/A')}",
         f"<b>Scenario Domain:</b> {e(q.get('scenario_domain') or 'N/A')}",
+        f"<b>Difficulty Level:</b> {e(_difficulty_label(q))}",
         f"<b>Provenance:</b> {e(provenance)}",
     ]
     out.append("<div class='reasoning-box'>" + "<br/>".join(box) + CLOSE_DIV)
@@ -232,6 +239,7 @@ def _add_scenario_question_docx(doc, number: int, bucket: str, q: Dict[str, Any]
     doc.add_paragraph().add_run(
         f"Rationale: {ar.get('correct_answer_explanation') or 'N/A'}").italic = True
     doc.add_paragraph(f"Scenario Domain: {q.get('scenario_domain') or 'N/A'}")
+    doc.add_paragraph(f"Difficulty Level: {_difficulty_label(q)}")
     doc.add_paragraph(
         f"Provenance: {PROVENANCE_LABELS.get(q.get('provenance'), q.get('provenance') or 'N/A')}"
     )

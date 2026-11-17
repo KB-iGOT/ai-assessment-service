@@ -15,10 +15,13 @@ path, is described under "Planned parallel generation" below):
 
   * **Its own prompt and response schema.** `scenario_prompt_template` in
     resources/prompts.yaml, and `SCENARIO_SCHEMA` below.
-  * **Scenario domains are assigned before the first call.** Each question
-    slot is given its domain round-robin across the whole assessment, and each
-    batch is told the domain of every question it writes — the same way the
-    standard path hands each batch its slice of the Bloom's assignment.
+  * **Scenario domains and difficulty levels are assigned before the first
+    call.** Each question slot is given its domain round-robin across the
+    whole assessment and its difficulty level by `difficulty.plan_difficulty`,
+    and each batch is told the domain and level of every question it writes —
+    the same way the standard path hands each batch its slice of the Bloom's
+    assignment. A batch can therefore mix levels; the model echoes each
+    question's level, and `_settle_difficulty` holds it to the assignment.
   * **The blueprint is computed, not generated.** Every field is a count or a
     property of the request, so no call is spent authoring it.
 
@@ -39,13 +42,20 @@ from collections import Counter, deque
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from . import generator as gen
-from .batching import Batch, merge_batches, plan_batches, summarize_for_dedup
+from .batching import Batch, merge_batches, plan_batches, slice_blooms, summarize_for_dedup
 from .config import (
     BATCH_MAX_ATTEMPTS,
     SCENARIO_BATCH_CONCURRENCY,
     SCENARIO_BATCH_SIZE,
     SCENARIO_PLANNER_ENABLED,
     TOPUP_MAX_ROUNDS,
+)
+from .difficulty import (
+    DIFFICULTY_LEVELS,
+    describe_levels,
+    order_levels,
+    plan_difficulty,
+    plan_totals,
 )
 from .questions import (
     BUCKET_ACTION_PLANNING,
@@ -66,6 +76,7 @@ from .response_recovery import (
     Buckets,
     count_by_type,
     extract_buckets,
+    remaining_blooms,
     requested_counts,
     shortfall,
     trim_to_counts,
@@ -148,6 +159,11 @@ def _question_schema(bucket: str, extra: Dict[str, Any]) -> Dict[str, Any]:
         "question_id": _STRING,
         "question_type": {"type": "string", "const": QUESTION_TYPE_CONST_BY_BUCKET[bucket]},
         "scenario_domain": _STRING,
+        "difficulty_level": {
+            "type": "string",
+            "enum": list(DIFFICULTY_LEVELS),
+            "description": "Exactly the difficulty level section 9 assigns this question.",
+        },
         "scenario": {
             "type": "object",
             "properties": {"title": _STRING, "description": _STRING, "constraints": _STRING_LIST},
@@ -271,6 +287,72 @@ def remaining_domains(
 
 
 # --------------------------------------------------------------------------
+# Difficulty levels
+# --------------------------------------------------------------------------
+# How many questions of each type are at each level is decided by
+# `difficulty.plan_difficulty`, and which slot gets which level by
+# `difficulty.order_levels`. Batching is unchanged: each batch takes its slots'
+# levels off a per-type queue in the order `plan_batches` hands out the
+# domains, so level and domain stay lined up.
+
+def attach_difficulties(batches: List[Batch], difficulties_by_type: Dict[str, List[str]]) -> None:
+    """Set each batch's `difficulty_by_type` to its slice of the assignment."""
+    queues: Dict[str, Deque[str]] = {
+        type_key: deque(levels) for type_key, levels in difficulties_by_type.items() if levels
+    }
+    for batch in batches:
+        batch.difficulty_by_type = slice_blooms(queues, batch.type_counts)
+
+
+def _settle_difficulty(payload: Any, assigned_by_type: Dict[str, List[str]]) -> List[str]:
+    """
+    Hold the `difficulty_level` the model returned for each question to the
+    levels its batch assigned, per type.
+
+    A question whose label the assignment still has room for keeps it; the
+    rest are given the assigned levels left over, in assignment order. The
+    model can mislabel or reorder, but the batch's counts per level are then
+    exactly what was assigned. A question beyond the assigned count — one the
+    trim will drop — keeps its label when it is a known level. Edits `payload`
+    in place and returns the id of every question whose label was changed.
+    """
+    changed: List[str] = []
+    for bucket, questions in extract_buckets(payload, layout=SCENARIO_BUCKETS).items():
+        assigned = list(assigned_by_type.get(TYPE_KEY_BY_BUCKET[bucket]) or [])
+        if not assigned or not questions:
+            continue
+        room = Counter(assigned)
+        unmatched: List[Dict[str, Any]] = []
+        for question in questions:
+            label = _norm(question.get("difficulty_level"))
+            if room.get(label, 0) > 0:
+                room[label] -= 1
+                question["difficulty_level"] = label
+            else:
+                unmatched.append(question)
+        leftover: List[str] = []
+        for level in assigned:
+            if room.get(level, 0) > 0:
+                room[level] -= 1
+                leftover.append(level)
+        for question in unmatched:
+            label = _norm(question.get("difficulty_level"))
+            new = leftover.pop(0) if leftover else (label if label in DIFFICULTY_LEVELS else assigned[0])
+            if new != question.get("difficulty_level"):
+                changed.append(str(question.get("question_id") or "?"))
+            question["difficulty_level"] = new
+    return changed
+
+
+def _log_settled(job_id: str, batch: Batch, changed: List[str]) -> None:
+    if changed:
+        logger.warning(
+            f"[{job_id}] {batch.describe()} returned difficulty labels off its assignment — "
+            f"relabelled to the assigned levels | questions={changed}"
+        )
+
+
+# --------------------------------------------------------------------------
 # Prompt
 # --------------------------------------------------------------------------
 
@@ -278,18 +360,20 @@ def format_scenario_type_instructions(
     type_counts: Dict[str, int],
     domains_by_type: Dict[str, List[str]],
     seeds_by_type: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    difficulties_by_type: Optional[Dict[str, List[str]]] = None,
 ) -> str:
     """
-    The per-type count block, with the domain of each question listed in
-    order. Types with a zero count are listed as DO NOT GENERATE, for the same
-    reason as on the standard path: naming every type stops the model
-    volunteering one that was not asked for.
+    The per-type count block, with the domain and difficulty level of each
+    question listed in order. Types with a zero count are listed as DO NOT
+    GENERATE, for the same reason as on the standard path: naming every type
+    stops the model volunteering one that was not asked for.
 
-    On the planned path each domain line also carries that question's seed
+    On the planned path each question line also carries that question's seed
     (see `format_seed`), lined up with the domains the same way `slice_plan`
     hands them out, and the block ends with what a seed does and does not fix.
     """
     seeds_by_type = seeds_by_type or {}
+    difficulties_by_type = difficulties_by_type or {}
     lines: List[str] = []
     for type_key in SCENARIO_TYPE_KEYS:
         count = int(type_counts.get(type_key) or 0)
@@ -298,19 +382,26 @@ def format_scenario_type_instructions(
             lines.append(f"     - 0 {label} [DO NOT GENERATE]")
             continue
         domains = domains_by_type.get(type_key) or []
-        if not domains:
+        levels = difficulties_by_type.get(type_key) or []
+        if not domains and not levels:
             lines.append(f"     - {count} {label}")
             continue
         seeds = seeds_by_type.get(type_key) or []
-        if seeds:
-            lines.append(f"     - {count} {label}, with these scenario domains and seeds in order:")
-            lines.extend(
-                f"         {i}. {domain}" + (f" — {format_seed(seeds[i - 1])}" if i <= len(seeds) else "")
-                for i, domain in enumerate(domains, start=1)
-            )
-        else:
-            lines.append(f"     - {count} {label}, with these scenario domains in order:")
-            lines.extend(f"         {i}. {domain}" for i, domain in enumerate(domains, start=1))
+        names = [name for name, present in (("scenario domains", bool(domains)),
+                                            ("difficulty levels", bool(levels)),
+                                            ("seeds", bool(seeds and domains))) if present]
+        listed = names[-1] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        lines.append(f"     - {count} {label}, with these {listed} in order:")
+        for i in range(min(count, max(len(domains), len(levels)))):
+            parts = []
+            if i < len(domains):
+                parts.append(domains[i])
+            if i < len(levels):
+                parts.append(f"(difficulty: {levels[i]})")
+            line = f"         {i + 1}. " + " ".join(parts)
+            if i < len(seeds) and i < len(domains):
+                line += f" — {format_seed(seeds[i])}"
+            lines.append(line)
     if any(seeds_by_type.values()):
         lines.extend([
             "",
@@ -318,7 +409,7 @@ def format_scenario_type_instructions(
             "     what kind of event starts it and the main roles involved. It is a",
             "     starting point that keeps the questions of this assessment apart, not",
             "     a script. You design the problem, stakes, constraints, title and",
-            "     question, following input 10 for the difficulty level. Add people,",
+            "     question, at the difficulty level given for it (input 10). Add people,",
             "     details and constraints wherever they make a stronger question.",
             "     The learner is \"you\", in the position the seed gives: write the",
             "     scenario and question in the second person, with you as the person",
@@ -368,7 +459,7 @@ def format_scenario_previously_generated(digest: List[Dict[str, str]]) -> str:
         "  - Every question you write MUST differ from all of the above in its\n"
         "    situation AND in the judgment it tests — not merely in names, places or\n"
         "    wording. Re-using a situation with different details is a duplicate.\n"
-        "  - This does NOT change your counts or domain assignments in section 9."
+        "  - This does NOT change your counts, domains or difficulty levels in section 9."
     )
 
 
@@ -379,20 +470,27 @@ def build_scenario_prompt(
     domains_by_type: Dict[str, List[str]],
     previously_generated: str = "",
     seeds_by_type: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    difficulties_by_type: Optional[Dict[str, List[str]]] = None,
 ) -> str:
     """
     Render `scenario_prompt_template`.
+
+    Input 10 names this batch's levels — one level, or the mix — taken from
+    `difficulties_by_type`; section 9 gives the level of each question.
 
     Placeholders whose values come from the user or the model are replaced
     last, so text inside them that happens to look like a placeholder is never
     substituted.
     """
     prompt = gen.ASSESSMENT_PROMPTS.get("scenario_prompt_template", "")
+    batch_levels = Counter(level for levels in (difficulties_by_type or {}).values() for level in levels)
     structural = [
         ("{question_type_instructions}",
-         format_scenario_type_instructions(type_counts, domains_by_type, seeds_by_type)),
+         format_scenario_type_instructions(type_counts, domains_by_type, seeds_by_type,
+                                           difficulties_by_type)),
         ("{total_questions}", str(sum(int(v or 0) for v in type_counts.values()))),
-        ("{difficulty_level}", inputs.get("difficulty_level") or "intermediate"),
+        ("{difficulty_level}", describe_levels(batch_levels) if batch_levels
+         else inputs.get("difficulty_level") or "intermediate"),
         ("{time_to_complete}", inputs.get("time_to_complete") or "Not provided (use standard pacing)"),
         ("{input_language}", inputs.get("input_language") or "English"),
     ]
@@ -489,7 +587,8 @@ async def _run_scenario_batches(
     Generate `batches` one after another, each shown the questions already
     generated. Stops at the first batch that fails after its retries, as the
     standard path does. `Batch.blooms_by_type` carries each batch's slice of the
-    domain assignment — `plan_batches` slices any per-type list the same way.
+    domain assignment — `plan_batches` slices any per-type list the same way —
+    and `Batch.difficulty_by_type` its slice of the difficulty assignment.
     """
     payloads: List[Any] = []
     usages: List[Any] = []
@@ -500,6 +599,7 @@ async def _run_scenario_batches(
             type_counts=batch.type_counts,
             domains_by_type=batch.blooms_by_type,
             previously_generated=format_scenario_previously_generated(digest),
+            difficulties_by_type=batch.difficulty_by_type,
         )
         try:
             payload, usage = await gen._generate_question_batch(
@@ -513,6 +613,7 @@ async def _run_scenario_batches(
             )
             break
 
+        _log_settled(job_id, batch, _settle_difficulty(payload, batch.difficulty_by_type))
         payloads.append(payload)
         usages.append(usage)
         digest.extend(summarize_for_dedup(payload))
@@ -712,6 +813,7 @@ async def _run_planned_batches(
             type_counts=batch.type_counts,
             domains_by_type=batch.blooms_by_type,
             seeds_by_type=seeds,
+            difficulties_by_type=batch.difficulty_by_type,
         )
         async with semaphore:
             try:
@@ -725,6 +827,7 @@ async def _run_planned_batches(
                     f"slots are left for the top-up round | {exc}"
                 )
                 return None
+        _log_settled(job_id, batch, _settle_difficulty(payload, batch.difficulty_by_type))
         logger.info(f"[{job_id}] planned {batch.describe()} complete")
         return payload, usage
 
@@ -737,13 +840,16 @@ async def _reconcile(
     pool: Buckets,
     wanted: Dict[str, int],
     domains_by_type: Dict[str, List[str]],
+    difficulties_by_type: Dict[str, List[str]],
     inputs: Dict[str, Any],
     job_id: str,
 ) -> Tuple[Buckets, List[Any]]:
     """
     Bring the generated questions to the requested per-type counts: trim any
-    extras, then generate what is missing in up to TOPUP_MAX_ROUNDS rounds,
-    each asked for the domains the kept questions have not used.
+    extras — those at a level the type's assignment has no room left for
+    first — then generate what is missing in up to TOPUP_MAX_ROUNDS rounds,
+    each asked for the domains and difficulty levels the kept questions have
+    not used.
     """
     if count_by_type(pool) == wanted:
         return pool, []
@@ -752,7 +858,9 @@ async def _reconcile(
         f"[{job_id}] Generated counts {count_by_type(pool)} differ from the "
         f"requested {wanted} — reconciling"
     )
-    kept, dropped = trim_to_counts(pool, wanted, layout=SCENARIO_BUCKETS)
+    trim_inputs = {"blooms_by_type": difficulties_by_type, "level_field": "difficulty_level",
+                   "layout": SCENARIO_BUCKETS}
+    kept, dropped = trim_to_counts(pool, wanted, **trim_inputs)
     if dropped:
         logger.info(f"[{job_id}] Trimmed extras by type: {dropped}")
 
@@ -762,11 +870,13 @@ async def _reconcile(
         if not missing:
             break
         domains = remaining_domains(domains_by_type, kept, missing)
+        levels = remaining_blooms(difficulties_by_type, kept, missing, level_field="difficulty_level")
         logger.warning(
             f"[{job_id}] Top-up round {round_no}/{TOPUP_MAX_ROUNDS} | missing {missing}"
-            f" | domains {domains}"
+            f" | domains {domains} | difficulty {levels}"
         )
         batches = plan_batches(missing, domains, batch_size=SCENARIO_BATCH_SIZE)
+        attach_difficulties(batches, levels)
         payloads, round_usages = await _run_scenario_batches(
             batches,
             digest=summarize_for_dedup({"questions": kept}),
@@ -780,7 +890,7 @@ async def _reconcile(
                 for question in questions:
                     question["question_id"] = new_question_id()
                 kept[bucket].extend(questions)
-        kept, _ = trim_to_counts(kept, wanted, layout=SCENARIO_BUCKETS)
+        kept, _ = trim_to_counts(kept, wanted, **trim_inputs)
 
     missing = shortfall(wanted, kept)
     if missing:
@@ -797,15 +907,14 @@ def _finalise_questions(
     questions: Buckets,
     *,
     domains: List[str],
-    difficulty_level: str,
     job_id: str,
 ) -> None:
     """
     The fixes applied to every generated question, and the log of anything
     left for a reviewer.
 
-      * `difficulty_level` is set to the request's on every question — a
-        scenario assessment has one difficulty, so it is not asked of the model.
+      * `difficulty_level` is already the assigned level — `_settle_difficulty`
+        held every batch to its assignment — so it is only checked here.
       * Rubric weights that do not add up to 100 are rescaled.
       * Every other problem the validation gate would report is logged and the
         question kept as generated. `provenance` is not set until the worker
@@ -814,7 +923,12 @@ def _finalise_questions(
     known_domains = {_norm(d) for d in domains}
     for bucket, bucket_questions in questions.items():
         for question in bucket_questions:
-            question["difficulty_level"] = difficulty_level
+            if question.get("difficulty_level") not in DIFFICULTY_LEVELS:
+                logger.warning(
+                    f"[{job_id}] Question has no assigned difficulty level | "
+                    f"question={question.get('question_id')} | "
+                    f"difficulty={question.get('difficulty_level')!r}"
+                )
             if bucket in RUBRIC_BUCKETS and rebalance_rubric_weights(question.get("rubric")):
                 logger.info(
                     f"[{job_id}] Rubric weights rescaled to 100 | question={question.get('question_id')}"
@@ -842,7 +956,6 @@ def build_scenario_blueprint(
     assessment_topic: str,
     target_audience: str,
     domains: List[str],
-    difficulty_level: str,
     input_language: str,
     time_limit: Optional[int],
     has_reference_content: bool,
@@ -857,10 +970,14 @@ def build_scenario_blueprint(
         match = next((d for d in domain_counts if _norm(d) == _norm(domain)), domain)
         domain_counts[match] = domain_counts.get(match, 0) + 1
 
-    difficulty = Counter(
+    found = Counter(
         str(q.get("difficulty_level") or "").strip() for q in all_questions
         if str(q.get("difficulty_level") or "").strip()
     )
+    # Canonical level order, anything unrecognised after it.
+    difficulty = {level: found[level] for level in DIFFICULTY_LEVELS if found[level]}
+    difficulty.update((k, v) for k, v in found.items() if k not in difficulty)
+    difficulty_level = describe_levels(difficulty) if difficulty else "unspecified"
 
     source = ("the uploaded reference documents" if has_reference_content
               else "the topic and scenario domains (no reference documents)")
@@ -923,7 +1040,14 @@ async def generate_scenario_assessment(
     if not wanted:
         raise ValueError("No scenario questions were requested — nothing to generate.")
     requested_total = sum(wanted.values())
-    difficulty_level = str(request.difficulty_level or "intermediate")
+    # The level of every question, decided before any call. A request with
+    # no list of levels uses its single `difficulty_level`.
+    difficulty_plan = plan_difficulty(
+        wanted,
+        levels=request.difficulty_levels or [request.difficulty_level or "intermediate"],
+        distribution=request.difficulty_distribution,
+    )
+    difficulty_level = describe_levels(plan_totals(difficulty_plan))
     input_language = str(request.input_language or "English")
     learning_areas = _clean_list(request.topic_names)
 
@@ -954,12 +1078,15 @@ async def generate_scenario_assessment(
     }
 
     domains_by_type = assign_domains(wanted, domains)
+    difficulties_by_type = order_levels(difficulty_plan, domains_by_type)
+    metadata["difficulty_plan"] = difficulty_plan
     batches = plan_batches(wanted, domains_by_type, batch_size=SCENARIO_BATCH_SIZE)
+    attach_difficulties(batches, difficulties_by_type)
     planned = SCENARIO_PLANNER_ENABLED and len(batches) > 1
     started = time.monotonic()
     logger.info(
         f"[{job_id}] Scenario generation | topic={topic!r} | {len(batches)} batch(es) | "
-        f"{requested_total} questions | domains={domains} | "
+        f"{requested_total} questions | domains={domains} | difficulty={difficulty_plan} | "
         f"{'planned, ' + str(SCENARIO_BATCH_CONCURRENCY) + ' in parallel' if planned else 'sequential'}"
     )
 
@@ -992,12 +1119,14 @@ async def generate_scenario_assessment(
 
     pool = merge_batches(payloads, layout=SCENARIO_BUCKETS)
     try:
-        pool, topup_usages = await _reconcile(pool, wanted, domains_by_type, inputs, job_id)
+        pool, topup_usages = await _reconcile(
+            pool, wanted, domains_by_type, difficulties_by_type, inputs, job_id,
+        )
         usages.extend(topup_usages)
     except Exception:
         logger.exception(f"[{job_id}] Count reconciliation failed — returning the batches as generated")
 
-    _finalise_questions(pool, domains=domains, difficulty_level=difficulty_level, job_id=job_id)
+    _finalise_questions(pool, domains=domains, job_id=job_id)
 
     assessment = {
         "blueprint": build_scenario_blueprint(
@@ -1005,7 +1134,6 @@ async def generate_scenario_assessment(
             assessment_topic=topic,
             target_audience=audience,
             domains=domains,
-            difficulty_level=difficulty_level,
             input_language=input_language,
             time_limit=request.time_limit,
             has_reference_content=bool(content_context),

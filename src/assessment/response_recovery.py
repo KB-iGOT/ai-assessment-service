@@ -81,18 +81,23 @@ def _course_ids_by_name(aggregated_metadata: Optional[Dict[str, Any]]) -> Dict[s
     return id_by_name
 
 
-def _over_assignment(questions: List[Dict[str, Any]], levels: Optional[List[str]]) -> set:
+def _over_assignment(
+    questions: List[Dict[str, Any]],
+    levels: Optional[List[str]],
+    level_field: str = "blooms_level",
+) -> set:
     """
-    Positions of the questions whose Bloom's level the type's assignment has no
-    room left for, walking in order — so of two questions on a level assigned
-    once, the later one is the surplus.
+    Positions of the questions whose level (`level_field`, the Bloom's level
+    unless the scenario path passes `difficulty_level`) the type's assignment
+    has no room left for, walking in order — so of two questions on a level
+    assigned once, the later one is the surplus.
     """
     if not levels:
         return set()
     room = Counter(_norm(level) for level in levels)
     over = set()
     for i, question in enumerate(questions):
-        level = _norm(question.get("blooms_level"))
+        level = _norm(question.get(level_field))
         if room.get(level, 0) > 0:
             room[level] -= 1
         else:
@@ -132,6 +137,7 @@ def trim_to_counts(
     course_counts: Optional[Dict[str, int]] = None,
     aggregated_metadata: Optional[Dict[str, Any]] = None,
     layout: Optional[List[str]] = None,
+    level_field: str = "blooms_level",
 ) -> Tuple[Buckets, Dict[str, int]]:
     """
     Keep at most the requested number of each type, and nothing of a type that
@@ -147,7 +153,9 @@ def trim_to_counts(
       3. the latest returned
 
     The kept questions stay in the order they were returned. `layout` is the
-    bucket set of the result, as for `extract_buckets`.
+    bucket set of the result, as for `extract_buckets`. `level_field` is the
+    question field `blooms_by_type` is matched against — the scenario path
+    passes its difficulty assignment with `difficulty_level`.
 
     Returns the trimmed buckets and how many questions were dropped per type.
     """
@@ -169,7 +177,7 @@ def trim_to_counts(
         dropped[type_key or bucket] = excess
         if limit <= 0:
             continue
-        over_level = _over_assignment(questions, (blooms_by_type or {}).get(type_key))
+        over_level = _over_assignment(questions, (blooms_by_type or {}).get(type_key), level_field)
         ranked = sorted(
             range(len(questions)),
             key=lambda i, ol=over_level, qs=questions: (i in ol, id(qs[i]) in over_course, i),
@@ -194,6 +202,7 @@ def remaining_blooms(
     blooms_by_type: Optional[Dict[str, List[str]]],
     kept: Buckets,
     missing: Dict[str, int],
+    level_field: str = "blooms_level",
 ) -> Dict[str, List[str]]:
     """
     The Bloom's levels a top-up should assign, per missing type.
@@ -201,7 +210,8 @@ def remaining_blooms(
     The kept questions are matched to the assignment by their `blooms_level`
     label rather than by position, because a short response is not guaranteed to
     be the leading run of the assignment. Whatever is left unmatched is what the
-    missing questions still owe, truncated to the number missing.
+    missing questions still owe, truncated to the number missing. The scenario
+    path reuses this for difficulty levels with `level_field="difficulty_level"`.
     """
     out: Dict[str, List[str]] = {}
     for type_key, count in missing.items():
@@ -209,7 +219,7 @@ def remaining_blooms(
         if not levels:
             continue
         used = Counter(
-            _norm(q.get("blooms_level"))
+            _norm(q.get(level_field))
             for q in kept.get(BUCKET_BY_TYPE_KEY[type_key], [])
         )
         left: List[str] = []
