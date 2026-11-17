@@ -88,7 +88,7 @@ async def health():
     return {"status": "healthy", "service": "assessment-generator"}
 
 from enum import Enum
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Tuple
 
 class AssessmentType(str, Enum):
     PRACTICE = "practice"
@@ -144,6 +144,53 @@ def _split_form_list(values: Optional[List[str]]) -> List[str]:
             parts = text.split(",")
         out.extend(str(p).strip() for p in parts if str(p).strip())
     return out
+
+
+def _split_comma_values(values: Optional[List[str]]) -> List[str]:
+    """
+    A list form field sent as repeated fields or comma-separated values —
+    each value split on commas, stripped, blanks dropped, order kept. Unlike
+    `_split_form_list`, a JSON array string is not parsed.
+    """
+    return [part.strip() for item in values or [] for part in item.split(",") if part.strip()]
+
+
+def _resolve_scenario_difficulty(
+    difficulty: Optional[Difficulty],
+    difficulty_levels: Optional[List[str]],
+    difficulty_distribution: Optional[str],
+    q_counts: Dict[str, int],
+) -> Tuple[Optional[Difficulty], Dict[str, Dict[str, int]], Dict[str, Any]]:
+    """
+    A scenario request's difficulty (see difficulty.py): the single
+    `difficulty` when every question is at one level, else None; the level
+    plan; and the fields a mixed request adds to the worker payload and config
+    (empty for a single level). Raises HTTP 400 when no usable level is given.
+    """
+    if difficulty_distribution in ["string", ""]: difficulty_distribution = None
+    requested_levels = [lv for lv in _split_form_list(difficulty_levels) if lv != "string"]
+    try:
+        parsed_distribution = json.loads(difficulty_distribution) if difficulty_distribution else None
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON for difficulty_distribution")
+    if not requested_levels and difficulty is not None:
+        requested_levels = [difficulty.value]
+    if not requested_levels and not parsed_distribution:
+        raise HTTPException(status_code=400, detail="difficulty, difficulty_levels or difficulty_distribution is required.")
+    try:
+        difficulty_plan = plan_difficulty(q_counts, levels=requested_levels, distribution=parsed_distribution)
+        requested_levels = normalise_levels(requested_levels)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    used_levels = plan_levels(difficulty_plan)
+    # A plan on one level is the plain single-difficulty request, whichever
+    # field named it — same cache key, same worker payload as before.
+    if len(used_levels) == 1:
+        return Difficulty(used_levels[0]), difficulty_plan, {}
+    return None, difficulty_plan, {
+        "difficulty_levels": requested_levels,
+        "difficulty_distribution": parsed_distribution,
+    }
 
 # ==========================================
 # API V1 Router
@@ -225,20 +272,9 @@ async def generate_v1(
         blooms_config = None
         enable_blooms = False
 
-    c_ids = []
-    if course_ids:
-        for item in course_ids:
-            c_ids.extend([c.strip() for c in item.split(",") if c.strip()])
-    
-    parsed_competency_themes = []
-    if competency_themes:
-        for item in competency_themes:
-            parsed_competency_themes.extend([t.strip() for t in item.split(",") if t.strip()])
-
-    parsed_competency_sub_themes = []
-    if competency_sub_themes:
-        for item in competency_sub_themes:
-            parsed_competency_sub_themes.extend([s.strip() for s in item.split(",") if s.strip()])
+    c_ids = _split_comma_values(course_ids)
+    parsed_competency_themes = _split_comma_values(competency_themes)
+    parsed_competency_sub_themes = _split_comma_values(competency_sub_themes)
 
     if is_scenario:
         # Generated from the topic, domains and audience, optionally grounded
@@ -279,30 +315,9 @@ async def generate_v1(
     difficulty_plan = None
     scenario_difficulty: Dict[str, Any] = {}
     if is_scenario:
-        if difficulty_distribution in ["string", ""]: difficulty_distribution = None
-        requested_levels = [lv for lv in _split_form_list(difficulty_levels) if lv != "string"]
-        try:
-            parsed_distribution = json.loads(difficulty_distribution) if difficulty_distribution else None
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON for difficulty_distribution")
-        if not requested_levels and difficulty is not None:
-            requested_levels = [difficulty.value]
-        if not requested_levels and not parsed_distribution:
-            raise HTTPException(status_code=400, detail="difficulty, difficulty_levels or difficulty_distribution is required.")
-        try:
-            difficulty_plan = plan_difficulty(q_counts, levels=requested_levels, distribution=parsed_distribution)
-            requested_levels = normalise_levels(requested_levels)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        used_levels = plan_levels(difficulty_plan)
-        # A plan on one level is the plain single-difficulty request, whichever
-        # field named it — same cache key, same worker payload as before.
-        difficulty = Difficulty(used_levels[0]) if len(used_levels) == 1 else None
-        if difficulty is None:
-            scenario_difficulty = {
-                "difficulty_levels": requested_levels,
-                "difficulty_distribution": parsed_distribution,
-            }
+        difficulty, difficulty_plan, scenario_difficulty = _resolve_scenario_difficulty(
+            difficulty, difficulty_levels, difficulty_distribution, q_counts,
+        )
     elif difficulty is None:
         raise HTTPException(status_code=400, detail="difficulty is required.")
 
@@ -410,10 +425,7 @@ async def generate_v1(
             }
 
     # --- 4. Start New Job ---
-    parsed_course_names = []
-    if course_names:
-        for item in course_names:
-            parsed_course_names.extend([n.strip() for n in item.split(",") if n.strip()])
+    parsed_course_names = _split_comma_values(course_names)
 
     initial_metadata = {
         "course_ids": c_ids,
