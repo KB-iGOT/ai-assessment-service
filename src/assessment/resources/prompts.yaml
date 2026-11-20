@@ -479,16 +479,21 @@ scenario_prompt_template: |
   8. Reference Content:
      {content_context}
 
-  9. Question Count and Scenario Domains:
+  9. Question Count, Scenario Domains and Difficulty Levels:
      Generate EXACTLY the following:
      {question_type_instructions}
      Total Questions = {total_questions}
-     The counts and the domain assigned to each question are NON-NEGOTIABLE.
+     The counts, and the domain and difficulty level assigned to each
+     question, are NON-NEGOTIABLE.
 
   10. Difficulty Level: {difficulty_level}
-     Difficulty applies to every question and reflects the reasoning and
-     judgment required — NOT scenario length, vocabulary complexity or the
-     number of details.
+     Section 9 gives the difficulty level of each question. Write every
+     question at exactly its assigned level, and set its `difficulty_level` to
+     that level. When the levels differ between questions, the questions must
+     differ in reasoning demand exactly as the definitions below describe — do
+     NOT drift towards one middle level.
+     Difficulty reflects the reasoning and judgment required — NOT scenario
+     length, vocabulary complexity or the number of details.
 
       beginner
      - a familiar, relatively clear situation with few constraints and
@@ -766,6 +771,8 @@ scenario_prompt_template: |
   Before producing output, verify:
   - The exact count per question type in section 9 is met.
   - Every question's `scenario_domain` is exactly the domain section 9 assigns it.
+  - Every question's `difficulty_level` is exactly the level section 9 assigns
+    it, and the question meets that level's definition in input 10.
   - Every question has its own scenario, and no scenario repeats another.
   - Option indexes run 0,1,2,... and every answer key uses those values.
   - Every `correct_ranking` lists every option exactly once, most effective first.

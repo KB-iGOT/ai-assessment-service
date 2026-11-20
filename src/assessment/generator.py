@@ -798,6 +798,10 @@ class GenerationRequest:
     assessment_topic: Optional[str] = None
     scenario_domains: Optional[List[str]] = None
     target_audience: Optional[str] = None
+    # Scenario only: more than one difficulty level. See difficulty.py — with
+    # neither set, every question is at `difficulty_level`.
+    difficulty_levels: Optional[List[str]] = None
+    difficulty_distribution: Optional[Dict[str, Any]] = None
 
 
 async def generate_assessment(request: GenerationRequest) -> Tuple[Dict, Dict, Dict]:

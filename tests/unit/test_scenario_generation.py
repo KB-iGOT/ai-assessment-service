@@ -188,7 +188,10 @@ async def test_generate_assessment_dispatches_scenario_requests(monkeypatch):
     assert len(llm.calls) == 1
     assert llm.calls[0]["use_kcm_cache"] is False
     assert llm.calls[0]["schema"] is scenario.SCENARIO_SCHEMA
-    assert metadata == {"courses": [], "content_availability": {}}
+    assert metadata == {
+        "courses": [], "content_availability": {},
+        "difficulty_plan": {"scenario_mcq": {"intermediate": 2}, "open_text": {"intermediate": 1}},
+    }
     assert usage["total_token_count"] == 10
 
 
@@ -241,8 +244,9 @@ async def test_a_short_response_is_topped_up_with_the_unused_domains(monkeypatch
 
     assert len(assessment["questions"][BUCKET_SCENARIO_MCQ]) == 2
     topup_prompt = llm.calls[1]["prompt"]
-    assert "1 Scenario-based MCQs (SCENARIO_MCQ), with these scenario domains in order:" in topup_prompt
-    assert "1. Ethical decisions" in topup_prompt
+    assert ("1 Scenario-based MCQs (SCENARIO_MCQ), with these scenario domains and "
+            "difficulty levels in order:") in topup_prompt
+    assert "1. Ethical decisions (difficulty: intermediate)" in topup_prompt
 
 
 async def test_extra_questions_are_trimmed(monkeypatch):
@@ -256,7 +260,7 @@ async def test_extra_questions_are_trimmed(monkeypatch):
     assert assessment["questions"][BUCKET_RANKING] == []
 
 
-async def test_generated_rubric_weights_are_repaired_and_difficulty_set_from_the_request(monkeypatch):
+async def test_generated_rubric_weights_are_repaired_and_difficulty_held_to_the_request(monkeypatch):
     question = open_text("c", difficulty_level="advanced", rubric=make_rubric((30, 30, 30)))
     monkeypatch.setattr(gen, "call_llm", FakeLLM([response(**{
         BUCKET_SCENARIO_MCQ: [scenario_mcq("a"), scenario_mcq("b")],
@@ -327,6 +331,119 @@ async def test_uploaded_documents_become_the_reference_content(monkeypatch, tmp_
     assert "acknowledged within 3 days" in llm.calls[0]["prompt"]
     assert metadata["content_availability"]["uploaded_files"]["has_pdf"] is True
     assert "uploaded reference documents" in assessment["blueprint"]["assessment_scope_summary"]
+
+
+# --------------------------------------------------------------------------
+# Mixed difficulty
+# --------------------------------------------------------------------------
+# request(difficulty_levels=["beginner", "advanced"]) splits the 3 questions
+# 2 beginner / 1 advanced: MCQ 1 Team conflict beginner, MCQ 2 Ethical
+# decisions advanced, open text Team conflict beginner.
+
+MIXED = {"difficulty_levels": ["beginner", "advanced"]}
+
+
+def test_each_questions_level_is_listed_next_to_its_domain():
+    text = scenario.format_scenario_type_instructions(
+        {"scenario_mcq": 2}, {"scenario_mcq": ["Team conflict", "Ethical decisions"]},
+        difficulties_by_type={"scenario_mcq": ["beginner", "advanced"]})
+    assert "2 Scenario-based MCQs (SCENARIO_MCQ), with these scenario domains and difficulty levels in order:" in text
+    assert "1. Team conflict (difficulty: beginner)" in text
+    assert "2. Ethical decisions (difficulty: advanced)" in text
+
+
+def test_levels_are_listed_even_without_domains():
+    text = scenario.format_scenario_type_instructions(
+        {"open_text": 1}, {}, difficulties_by_type={"open_text": ["advanced"]})
+    assert "1 Open Text Questions (OPEN_TEXT), with these difficulty levels in order:" in text
+    assert "1. (difficulty: advanced)" in text
+
+
+async def test_a_mixed_request_assigns_levels_per_question_in_one_batch(monkeypatch):
+    llm = FakeLLM([response(**{
+        BUCKET_SCENARIO_MCQ: [scenario_mcq("a"),
+                              scenario_mcq("b", scenario_domain="Ethical decisions", difficulty_level="advanced")],
+        BUCKET_OPEN_TEXT: [open_text("c", difficulty_level="beginner")],
+    })])
+    monkeypatch.setattr(gen, "call_llm", llm)
+
+    metadata, assessment, _ = await gen.generate_assessment(request(**MIXED))
+
+    # Same single batch as a one-level request; each question carries its level.
+    assert len(llm.calls) == 1
+    prompt = llm.calls[0]["prompt"]
+    assert "Difficulty Level: mixed (beginner: 2, advanced: 1)" in prompt
+    assert "1. Team conflict (difficulty: beginner)" in prompt
+    assert "2. Ethical decisions (difficulty: advanced)" in prompt
+    assert metadata["difficulty_plan"] == {"scenario_mcq": {"beginner": 1, "advanced": 1},
+                                           "open_text": {"beginner": 1}}
+
+    # The model's "intermediate" on question a has no room in the assignment,
+    # so it takes the level left over.
+    mcqs = assessment["questions"][BUCKET_SCENARIO_MCQ]
+    assert [q["difficulty_level"] for q in mcqs] == ["beginner", "advanced"]
+    assert assessment["questions"][BUCKET_OPEN_TEXT][0]["difficulty_level"] == "beginner"
+    blueprint = assessment["blueprint"]
+    assert blueprint["difficulty_distribution"] == "beginner: 2, advanced: 1"
+    assert "at mixed (beginner: 2, advanced: 1) difficulty" in blueprint["assessment_scope_summary"]
+
+
+async def test_a_per_type_distribution_reaches_the_prompt(monkeypatch):
+    llm = FakeLLM([response(**{
+        BUCKET_SCENARIO_MCQ: [scenario_mcq("a"), scenario_mcq("b")],
+        BUCKET_OPEN_TEXT: [open_text("c")],
+    })])
+    monkeypatch.setattr(gen, "call_llm", llm)
+
+    _, assessment, _ = await gen.generate_assessment(request(
+        difficulty_level="beginner",
+        difficulty_distribution={"open_text": {"advanced": 1}},
+    ))
+
+    assert "1. Team conflict (difficulty: advanced)" in llm.calls[0]["prompt"].split("Open Text Questions")[1]
+    assert [q["difficulty_level"] for qs in assessment["questions"].values() for q in qs] == [
+        "beginner", "beginner", "advanced"]
+
+
+async def test_an_invalid_difficulty_request_fails_before_any_call(monkeypatch):
+    llm = FakeLLM([])
+    monkeypatch.setattr(gen, "call_llm", llm)
+    with pytest.raises(ValueError, match="add up to"):
+        await gen.generate_assessment(request(difficulty_distribution={"beginner": 1}))
+    assert llm.calls == []
+
+
+async def test_a_top_up_asks_for_the_missing_level(monkeypatch):
+    monkeypatch.setattr(scenario, "TOPUP_MAX_ROUNDS", 1)
+    llm = FakeLLM([
+        # The advanced MCQ is missing.
+        response(**{BUCKET_SCENARIO_MCQ: [scenario_mcq("a", difficulty_level="beginner")],
+                    BUCKET_OPEN_TEXT: [open_text("c", difficulty_level="beginner")]}),
+        response(**{BUCKET_SCENARIO_MCQ: [scenario_mcq("b", scenario_domain="Ethical decisions",
+                                                       difficulty_level="advanced")]}),
+    ])
+    monkeypatch.setattr(gen, "call_llm", llm)
+
+    _, assessment, _ = await gen.generate_assessment(request(**MIXED))
+
+    topup_prompt = llm.calls[1]["prompt"]
+    assert "Difficulty Level: advanced" in topup_prompt
+    assert "1. Ethical decisions (difficulty: advanced)" in topup_prompt
+    assert sorted(q["difficulty_level"] for q in assessment["questions"][BUCKET_SCENARIO_MCQ]) == [
+        "advanced", "beginner"]
+
+
+async def test_extras_at_a_level_with_no_room_are_trimmed_first(monkeypatch):
+    monkeypatch.setattr(gen, "call_llm", FakeLLM([response(**{
+        BUCKET_SCENARIO_MCQ: [scenario_mcq("a", difficulty_level="beginner"),
+                              scenario_mcq("x", difficulty_level="beginner"),
+                              scenario_mcq("b", difficulty_level="advanced")],
+        BUCKET_OPEN_TEXT: [open_text("c", difficulty_level="beginner")],
+    })]))
+    _, assessment, _ = await gen.generate_assessment(request(**MIXED))
+    # Not the latest returned: the second beginner, which the assignment has no room for.
+    assert [q["difficulty_level"] for q in assessment["questions"][BUCKET_SCENARIO_MCQ]] == [
+        "beginner", "advanced"]
 
 
 # --------------------------------------------------------------------------
@@ -435,10 +552,10 @@ async def test_large_requests_plan_once_then_run_batches_with_their_own_seeds(mo
     # Each batch sees only its own seeds and no "already generated" list.
     mcq_prompt = next(c["prompt"] for c in batch_calls if MCQ_X2 in c["prompt"])
     open_prompt = next(c["prompt"] for c in batch_calls if OPEN_X1 in c["prompt"])
-    assert "1. Team conflict — you: Learner 1; setting: Setting 1" in mcq_prompt
-    assert "2. Ethical decisions — you: Learner 2; setting: Setting 2" in mcq_prompt
+    assert "1. Team conflict (difficulty: intermediate) — you: Learner 1; setting: Setting 1" in mcq_prompt
+    assert "2. Ethical decisions (difficulty: intermediate) — you: Learner 2; setting: Setting 2" in mcq_prompt
     assert "Setting 3" not in mcq_prompt
-    assert "1. Team conflict — you: Learner 3; setting: Setting 3" in open_prompt
+    assert "1. Team conflict (difficulty: intermediate) — you: Learner 3; setting: Setting 3" in open_prompt
     assert "Setting 1" not in open_prompt
     assert all("ALREADY GENERATED" not in c["prompt"] for c in batch_calls)
 

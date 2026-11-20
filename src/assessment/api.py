@@ -22,6 +22,7 @@ from .cleanup import start_cleanup_scheduler, stop_cleanup_scheduler
 from .events import stop_kafka_producer, send_request_event
 from .exporters_csv_v2 import generate_csv_v2, generate_csv_basic
 from .questions import SCENARIO_TYPE_KEYS, normalize_assessment, question_count
+from .difficulty import normalise_levels, plan_difficulty, plan_levels
 from .validation import ValidationError, validate_assessment, _err
 from .editing import (
     AUDIT_QUESTION_ADDED, AUDIT_QUESTION_EDIT_SAVED,
@@ -87,7 +88,7 @@ async def health():
     return {"status": "healthy", "service": "assessment-generator"}
 
 from enum import Enum
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Tuple
 
 class AssessmentType(str, Enum):
     PRACTICE = "practice"
@@ -144,6 +145,53 @@ def _split_form_list(values: Optional[List[str]]) -> List[str]:
         out.extend(str(p).strip() for p in parts if str(p).strip())
     return out
 
+
+def _split_comma_values(values: Optional[List[str]]) -> List[str]:
+    """
+    A list form field sent as repeated fields or comma-separated values —
+    each value split on commas, stripped, blanks dropped, order kept. Unlike
+    `_split_form_list`, a JSON array string is not parsed.
+    """
+    return [part.strip() for item in values or [] for part in item.split(",") if part.strip()]
+
+
+def _resolve_scenario_difficulty(
+    difficulty: Optional[Difficulty],
+    difficulty_levels: Optional[List[str]],
+    difficulty_distribution: Optional[str],
+    q_counts: Dict[str, int],
+) -> Tuple[Optional[Difficulty], Dict[str, Dict[str, int]], Dict[str, Any]]:
+    """
+    A scenario request's difficulty (see difficulty.py): the single
+    `difficulty` when every question is at one level, else None; the level
+    plan; and the fields a mixed request adds to the worker payload and config
+    (empty for a single level). Raises HTTP 400 when no usable level is given.
+    """
+    if difficulty_distribution in ["string", ""]: difficulty_distribution = None
+    requested_levels = [lv for lv in _split_form_list(difficulty_levels) if lv != "string"]
+    try:
+        parsed_distribution = json.loads(difficulty_distribution) if difficulty_distribution else None
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON for difficulty_distribution")
+    if not requested_levels and difficulty is not None:
+        requested_levels = [difficulty.value]
+    if not requested_levels and not parsed_distribution:
+        raise HTTPException(status_code=400, detail="difficulty, difficulty_levels or difficulty_distribution is required.")
+    try:
+        difficulty_plan = plan_difficulty(q_counts, levels=requested_levels, distribution=parsed_distribution)
+        requested_levels = normalise_levels(requested_levels)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    used_levels = plan_levels(difficulty_plan)
+    # A plan on one level is the plain single-difficulty request, whichever
+    # field named it — same cache key, same worker payload as before.
+    if len(used_levels) == 1:
+        return Difficulty(used_levels[0]), difficulty_plan, {}
+    return None, difficulty_plan, {
+        "difficulty_levels": requested_levels,
+        "difficulty_distribution": parsed_distribution,
+    }
+
 # ==========================================
 # API V1 Router
 # ==========================================
@@ -159,7 +207,11 @@ async def generate_v1(
     course_ids: Optional[List[str]] = Form(None, description="List of Course IDs"),
     force: bool = Form(False),
     assessment_type: AssessmentType = Form(...),
-    difficulty: Difficulty = Form(...),
+    difficulty: Optional[Difficulty] = Form(
+        None,
+        description="Difficulty of every question. Required, except for assessment_type=scenario "
+                    "when difficulty_levels or difficulty_distribution is given instead.",
+    ),
     total_questions: int = Form(5),
     question_type_counts: str = Form(
         '{"mcq": 5, "ftb": 5, "mtf": 5, "multichoice": 5, "truefalse": 5}',
@@ -183,6 +235,8 @@ async def generate_v1(
     assessment_topic: Optional[str] = Form(None, description="Overall subject of a scenario assessment (required for scenario type). e.g. 'Leadership and conflict management'"),
     scenario_domains: Optional[List[str]] = Form(None, description="Scenario domains/topics (required for scenario type, at least one). Pass as repeated fields, a comma-separated value or a JSON array."),
     target_audience: Optional[str] = Form(None, description="Who the scenario questions are for — learner group, role, experience or background (required for scenario type). e.g. 'New district officers'"),
+    difficulty_levels: Optional[List[str]] = Form(None, description="Scenario type only: one or more of beginner, intermediate, advanced. The questions are split evenly across them — over the whole assessment first, then within each question type. Pass as repeated fields, a comma-separated value or a JSON array."),
+    difficulty_distribution: Optional[str] = Form(None, description='Scenario type only: JSON fixing how many questions are at each level. Level keys are counts over the whole assessment and must add up to the total, e.g. {"beginner": 4, "advanced": 6}. Question-type keys fix that type exactly and must add up to its count, e.g. {"sjt_ranking": {"advanced": 2, "beginner": 1}}; types left out are split from the level counts or difficulty_levels.'),
     files: Optional[List[UploadFile]] = File(None, description="Supporting documents (.pdf, .docx). Always treated as document content."),
     transcript_files: Optional[List[UploadFile]] = File(None, description="Transcripts (.vtt, .txt, .pdf, .docx). Always treated as transcript content.")
 ):
@@ -218,20 +272,9 @@ async def generate_v1(
         blooms_config = None
         enable_blooms = False
 
-    c_ids = []
-    if course_ids:
-        for item in course_ids:
-            c_ids.extend([c.strip() for c in item.split(",") if c.strip()])
-    
-    parsed_competency_themes = []
-    if competency_themes:
-        for item in competency_themes:
-            parsed_competency_themes.extend([t.strip() for t in item.split(",") if t.strip()])
-
-    parsed_competency_sub_themes = []
-    if competency_sub_themes:
-        for item in competency_sub_themes:
-            parsed_competency_sub_themes.extend([s.strip() for s in item.split(",") if s.strip()])
+    c_ids = _split_comma_values(course_ids)
+    parsed_competency_themes = _split_comma_values(competency_themes)
+    parsed_competency_sub_themes = _split_comma_values(competency_sub_themes)
 
     if is_scenario:
         # Generated from the topic, domains and audience, optionally grounded
@@ -266,6 +309,17 @@ async def generate_v1(
             raise HTTPException(400, "At least one question must be requested.")
         # The counts are what gets generated; the stored total follows them.
         total_questions = sum(q_counts.values())
+
+    # Difficulty. A scenario assessment can mix levels (see difficulty.py);
+    # every other type has exactly one and must name it.
+    difficulty_plan = None
+    scenario_difficulty: Dict[str, Any] = {}
+    if is_scenario:
+        difficulty, difficulty_plan, scenario_difficulty = _resolve_scenario_difficulty(
+            difficulty, difficulty_levels, difficulty_distribution, q_counts,
+        )
+    elif difficulty is None:
+        raise HTTPException(status_code=400, detail="difficulty is required.")
 
     t_names = [t.strip() for t in topic_names.split(",")] if topic_names else None
     
@@ -303,6 +357,10 @@ async def generate_v1(
         param_list.extend([
             str(assessment_topic), str(sorted(parsed_scenario_domains)), str(target_audience),
         ])
+        # Mixed difficulty only, so single-level keys are unchanged. Keyed by
+        # the resolved plan: requests that allocate the same way share a cache.
+        if scenario_difficulty:
+            param_list.append(f"difficulty_plan:{difficulty_plan}")
 
     param_str = "_".join(param_list)
     param_hash = hashlib.md5(param_str.encode()).hexdigest()[:8]
@@ -323,7 +381,7 @@ async def generate_v1(
     
     user_job_id = f"{composite_id}_{user_id}"
 
-    logger.info(f"[{user_job_id}] Generate request | user={user_id} | type={assessment_type} | courses={c_ids} | questions={total_questions} | language={language} | difficulty={difficulty} | force={force}")
+    logger.info(f"[{user_job_id}] Generate request | user={user_id} | type={assessment_type} | courses={c_ids} | questions={total_questions} | language={language} | difficulty={difficulty or difficulty_plan} | force={force}")
 
     # --- 3. Check Status (V2 Logic: Clone or Generate) ---
 
@@ -367,10 +425,7 @@ async def generate_v1(
             }
 
     # --- 4. Start New Job ---
-    parsed_course_names = []
-    if course_names:
-        for item in course_names:
-            parsed_course_names.extend([n.strip() for n in item.split(",") if n.strip()])
+    parsed_course_names = _split_comma_values(course_names)
 
     initial_metadata = {
         "course_ids": c_ids,
@@ -396,6 +451,7 @@ async def generate_v1(
         "assessment_topic": assessment_topic,
         "scenario_domains": parsed_scenario_domains,
         "target_audience": target_audience,
+        **scenario_difficulty,
     } if is_scenario else {}
     initial_metadata["config"].update(scenario_fields)
     await create_job(user_job_id, user_id=user_id, metadata=initial_metadata)

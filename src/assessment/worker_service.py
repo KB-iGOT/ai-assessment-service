@@ -128,6 +128,8 @@ async def process_job(payload: Dict[str, Any]):
                 assessment_topic=payload.get('assessment_topic'),
                 scenario_domains=payload.get('scenario_domains'),
                 target_audience=payload.get('target_audience'),
+                difficulty_levels=payload.get('difficulty_levels'),
+                difficulty_distribution=payload.get('difficulty_distribution'),
             ))
         llm_duration = round(time.monotonic() - t_llm, 2)
         input_tokens = usage.get('prompt_token_count', 'N/A') if usage else 'N/A'
@@ -159,6 +161,8 @@ async def process_job(payload: Dict[str, Any]):
             "assessment_topic": payload.get('assessment_topic'),
             "scenario_domains": payload.get('scenario_domains'),
             "target_audience": payload.get('target_audience'),
+            "difficulty_levels": payload.get('difficulty_levels'),
+            "difficulty_distribution": payload.get('difficulty_distribution'),
         }
 
         # 6. Bring the LLM output into the editable model before it is stored:

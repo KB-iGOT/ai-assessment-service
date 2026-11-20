@@ -106,6 +106,68 @@ def test_topic_domains_and_audience_are_part_of_the_cache_key(client, change):
     assert job_id_for(client, form()) != job_id_for(client, form(**change))
 
 
+# --------------------------------------------------------------------------
+# Difficulty
+# --------------------------------------------------------------------------
+
+def test_several_levels_reach_the_worker_without_a_single_difficulty(client, fake_db, sent_events):
+    response = client.post(URL, data=form(difficulty=None, difficulty_levels="advanced, beginner"))
+    assert response.status_code == 200
+
+    payload = sent_events[0]
+    assert payload["difficulty"] is None
+    assert payload["difficulty_levels"] == ["beginner", "advanced"]
+    assert payload["difficulty_distribution"] is None
+    config = fake_db.created_jobs[0]["metadata"]["config"]
+    assert config["difficulty"] is None and config["difficulty_levels"] == ["beginner", "advanced"]
+
+
+def test_a_distribution_is_validated_and_passed_on(client, sent_events):
+    dist = {"beginner": 1, "advanced": 2, "open_text": {"advanced": 1}}
+    response = client.post(URL, data=form(difficulty=None, difficulty_distribution=json.dumps(dist)))
+    assert response.status_code == 200
+    assert sent_events[0]["difficulty_distribution"] == dist
+
+
+@pytest.mark.parametrize("overrides, message", [
+    ({"difficulty": None}, "difficulty, difficulty_levels or difficulty_distribution is required"),
+    ({"difficulty_levels": "beginner, expert"}, "Unknown difficulty level"),
+    ({"difficulty_distribution": "{not json"}, "Invalid JSON for difficulty_distribution"),
+    ({"difficulty_distribution": json.dumps({"beginner": 1, "advanced": 1})}, "add up to 2, but 3"),
+    ({"difficulty_distribution": json.dumps({"open_text": {"advanced": 2}})}, "adds up to 2, but 1"),
+])
+def test_difficulty_requests_that_cannot_be_met_are_rejected(client, overrides, message):
+    response = client.post(URL, data=form(**overrides))
+    assert response.status_code == 400
+    assert message in response.json()["detail"]
+
+
+def test_one_level_however_it_is_sent_is_the_plain_single_difficulty_request(client, sent_events):
+    a = job_id_for(client, form(difficulty="advanced"))
+    b = job_id_for(client, form(difficulty=None, difficulty_levels="advanced"))
+    c = job_id_for(client, form(difficulty=None, difficulty_distribution=json.dumps({"advanced": 3})))
+    assert a == b == c
+    assert all(e["difficulty"] == "advanced" and "difficulty_levels" not in e for e in sent_events)
+
+
+def test_the_difficulty_split_is_part_of_the_cache_key(client):
+    even = job_id_for(client, form(difficulty=None, difficulty_levels="beginner, advanced"))
+    same = job_id_for(client, form(difficulty=None,
+                                   difficulty_distribution=json.dumps({"beginner": 2, "advanced": 1})))
+    other = job_id_for(client, form(difficulty=None,
+                                    difficulty_distribution=json.dumps({"beginner": 1, "advanced": 2})))
+    assert even == same  # the even split of 3 over two levels is 2/1
+    assert even != other
+    assert even != job_id_for(client, form())
+
+
+def test_other_assessment_types_still_need_a_difficulty(client):
+    response = client.post(URL, data=form(assessment_type="final", course_ids="do_1", difficulty=None,
+                                          question_type_counts=json.dumps({"mcq": 2})))
+    assert response.status_code == 400
+    assert "difficulty is required" in response.json()["detail"]
+
+
 def test_domain_order_and_blooms_settings_do_not_change_the_cache_key(client):
     a = job_id_for(client, form(scenario_domains="Team conflict, Ethical decisions"))
     b = job_id_for(client, form(scenario_domains="Ethical decisions, Team conflict",

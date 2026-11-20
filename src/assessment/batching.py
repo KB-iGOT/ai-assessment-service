@@ -76,6 +76,9 @@ class Batch:
     index: int
     type_counts: Dict[str, int]
     blooms_by_type: Dict[str, List[str]] = field(default_factory=dict)
+    # Scenario path only: the difficulty level of each slot, per type, lined up
+    # position for position with `blooms_by_type` (which carries the domains).
+    difficulty_by_type: Dict[str, List[str]] = field(default_factory=dict)
     course_counts: Dict[str, int] = field(default_factory=dict)
     # The last batch authors the blueprint: it is the only call that has seen
     # every question, via the "already generated" list.
